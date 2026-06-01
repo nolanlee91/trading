@@ -383,7 +383,7 @@ Giá trị thật nằm ở JOURNAL: ghi lệnh của chính anh để tìm EDGE
 <h2>🧠 Edge cá nhân (cần đủ lệnh mới đáng tin)</h2>
 <div class="card" id="stats">chưa có dữ liệu.</div>
 
-<button onclick="loadAll(true)">⟳ Refresh data</button>
+<button id="refreshBtn" onclick="loadAll(true)">⟳ Refresh data</button>
 <script>
 const cls=t=>t==='bullish'?'bull':t==='bearish'?'bear':'mixed';
 const bandCls=b=>b==='Bình thường'?'b-ok':b==='Cẩn thận'?'b-warn':'b-bad';
@@ -405,9 +405,13 @@ function card(c){
   ${chk}${flags}</div>`;
 }
 async function loadDash(force){
- const r=await fetch('/api/dashboard'+(force?'?refresh_now=true':''));const d=await r.json();
- document.getElementById('asof').textContent=d.status==='ok'?('Cập nhật: '+d.asof+' · nguồn '+(d.source||'?')):d.status;
- document.getElementById('app').innerHTML=(d.coins||[]).map(card).join('');
+ const a=document.getElementById('asof');const btn=document.getElementById('refreshBtn');
+ if(force){a.textContent='⏳ Đang kéo data mới (~30-60s)...';if(btn){btn.disabled=true;btn.textContent='⏳ Đang làm mới...';}}
+ try{
+  const r=await fetch('/api/dashboard'+(force?'?refresh_now=true':''));const d=await r.json();
+  a.textContent=d.status==='ok'?('✅ Cập nhật: '+d.asof+' · nguồn '+(d.source||'?')):d.status;
+  document.getElementById('app').innerHTML=(d.coins||[]).map(card).join('');
+ }finally{ if(btn){btn.disabled=false;btn.textContent='⟳ Refresh data';} }
 }
 async function loadTrades(){
  const rows=await (await fetch('/api/journal')).json();
