@@ -24,6 +24,7 @@ import threading
 import urllib.error
 import urllib.request
 
+import ccxt
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -40,6 +41,12 @@ FUNDING_PCT_DAYS = 365
 DB_PATH = os.environ.get("DB_PATH", "journal.db")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")          # đặt biến môi trường, KHÔNG hardcode
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+
+# Binance hay bị chặn 451 ở một số mạng (công ty/cloud). Tự dò sàn vào được.
+# Ép 1 sàn cụ thể bằng env DATA_EXCHANGE; mặc định thử Bybit → Binance → OKX.
+DATA_EXCHANGES = ([os.environ["DATA_EXCHANGE"]] if os.environ.get("DATA_EXCHANGE")
+                  else ["bybit", "binance", "okx"])
+_RESOLVED_EX = None
 
 SNAPSHOT: dict = {"asof": None, "status": "đang tải lần đầu...", "coins": []}
 _LOCK = threading.Lock()
@@ -59,12 +66,29 @@ def _since(days: int) -> str:
     return d.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def data_exchange() -> str:
+    """Dò 1 lần sàn nào vào được (tránh 451 Binance), cache lại kết quả."""
+    global _RESOLVED_EX
+    if _RESOLVED_EX:
+        return _RESOLVED_EX
+    for name in DATA_EXCHANGES:
+        try:
+            getattr(ccxt, name)({"enableRateLimit": True}).fetch_ohlcv("BTC/USDT", "4h", limit=1)
+            _RESOLVED_EX = name
+            return name
+        except Exception:
+            continue
+    _RESOLVED_EX = DATA_EXCHANGES[0]   # fallback: vẫn trả 1 tên để báo lỗi rõ ràng
+    return _RESOLVED_EX
+
+
 def analyze_coin(spot: str, perp: str, force: bool) -> dict:
-    fb = dict(symbol=spot, exchange="binance", market="spot",
+    ex = data_exchange()
+    fb = dict(symbol=spot, exchange=ex, market="spot",
               since=_since(LOOKBACK_DAYS), until=None, cache_dir=CACHE, force=force)
     h4 = fetch_ohlcv(timeframe="4h", **fb)
     d1 = fetch_ohlcv(timeframe="1d", **fb)
-    fund = fetch_funding(perp, "binance", _since(FUNDING_PCT_DAYS + 30), None, CACHE, force=force)
+    fund = fetch_funding(perp, ex, _since(FUNDING_PCT_DAYS + 30), None, CACHE, force=force)
 
     e20 = ema(h4["close"], 20); e50 = ema(h4["close"], 50); e200 = ema(h4["close"], 200)
     r = rsi(h4["close"], 14); a = atr(h4["high"], h4["low"], h4["close"], 14)
@@ -132,6 +156,7 @@ def refresh(force: bool = True) -> None:
         SNAPSHOT["coins"] = coins
         SNAPSHOT["asof"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         SNAPSHOT["status"] = "ok"
+        SNAPSHOT["source"] = _RESOLVED_EX or "?"
 
 
 def _ctx_for(symbol: str) -> dict:
@@ -381,7 +406,7 @@ function card(c){
 }
 async function loadDash(force){
  const r=await fetch('/api/dashboard'+(force?'?refresh_now=true':''));const d=await r.json();
- document.getElementById('asof').textContent=d.status==='ok'?('Cập nhật: '+d.asof):d.status;
+ document.getElementById('asof').textContent=d.status==='ok'?('Cập nhật: '+d.asof+' · nguồn '+(d.source||'?')):d.status;
  document.getElementById('app').innerHTML=(d.coins||[]).map(card).join('');
 }
 async function loadTrades(){

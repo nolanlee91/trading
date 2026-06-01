@@ -56,16 +56,21 @@ def fetch_ohlcv(
     since_ms = ex.parse8601(since)
     until_ms = ex.parse8601(until) if until else ex.milliseconds()
 
+    # Phân trang tới khi chạm hiện tại. KHÔNG dùng "len(batch)<limit -> break" vì
+    # nhiều sàn (Bybit/OKX) giới hạn ~200 nến/lần -> sẽ dừng sớm và trả data CŨ.
     rows: list[list] = []
     cursor = since_ms
+    last_ts = None
     while cursor < until_ms:
         batch = ex.fetch_ohlcv(symbol, timeframe, since=cursor, limit=1000)
         if not batch:
             break
         rows.extend(batch)
-        cursor = batch[-1][0] + tf_ms
-        if len(batch) < 1000:
+        newest = batch[-1][0]
+        if last_ts is not None and newest <= last_ts:   # không tiến triển -> dừng
             break
+        last_ts = newest
+        cursor = newest + tf_ms
         time.sleep(ex.rateLimit / 1000)
 
     df = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])

@@ -44,8 +44,10 @@ railway domain          # tạo URL public để mở trên điện thoại
 ## Lưu ý
 - Filesystem Railway là tạm: mỗi lần redeploy sẽ kéo lại data từ đầu (vài chục giây). OK.
 - Scheduler kéo data thật mỗi 5 phút. Đổi nhịp ở `app.py` (`sched.add_job ... minutes=`).
-- Funding/giá lấy từ Binance public API (không cần API key). Nếu Railway region bị
-  Binance chặn, đổi `exchange` sang sàn khác trong `app.py` hoặc dùng Hyperliquid.
+- Giá/funding lấy từ sàn public (không cần API key). Binance hay bị chặn 451 ở mạng
+  công ty/cloud → app **tự dò** Bybit → Binance → OKX, dùng sàn nào vào được. Ép 1 sàn
+  bằng env `DATA_EXCHANGE=bybit`. (Symbol dùng định dạng chung của CCXT nên đổi sàn không
+  cần sửa gì khác.)
 - Muốn lưu lịch sử snapshot (để soi lại): thêm PostgreSQL của Railway sau (Phase tiếp).
 - **Journal (L4) dùng SQLite.** Filesystem Railway tạm → mỗi redeploy MẤT journal. Để giữ:
   Railway → service → Variables thêm `DB_PATH=/data/journal.db`, rồi gắn một **Volume**

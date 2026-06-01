@@ -34,16 +34,20 @@ def fetch_funding(
     since_ms = ex.parse8601(since)
     until_ms = ex.parse8601(until) if until else ex.milliseconds()
 
+    # Phân trang tới hiện tại; không dựa vào kích thước batch (sàn giới hạn page khác nhau).
     rows: list[dict] = []
     cursor = since_ms
+    last_ts = None
     while cursor < until_ms:
         batch = ex.fetch_funding_rate_history(symbol, since=cursor, limit=1000)
         if not batch:
             break
         rows.extend(batch)
-        cursor = batch[-1]["timestamp"] + 1
-        if len(batch) < 1000:
+        newest = batch[-1]["timestamp"]
+        if last_ts is not None and newest <= last_ts:   # không tiến triển -> dừng
             break
+        last_ts = newest
+        cursor = newest + 1
         time.sleep(ex.rateLimit / 1000)
 
     df = pd.DataFrame([
