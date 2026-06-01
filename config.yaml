@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────
+# Phase 1 — Edge Lab config
+# Mọi giả định về chi phí & rule đều nằm ở đây, không hardcode trong code.
+# ─────────────────────────────────────────────────────────────
+
+data:
+  # Mỗi symbol khai báo sàn riêng. BTC/ETH/SOL dùng Binance (lịch sử sâu).
+  # HYPE BẮT BUỘC dùng Hyperliquid — Binance không có. Vì vậy HYPE test riêng.
+  symbols:
+    - { name: "BTC/USDT",  exchange: "binance",     market: "spot" }
+    - { name: "ETH/USDT",  exchange: "binance",     market: "spot" }
+    - { name: "SOL/USDT",  exchange: "binance",     market: "spot" }
+    # Mở khi muốn test riêng HYPE (nguồn + regime khác hẳn):
+    # - { name: "HYPE/USDC", exchange: "hyperliquid", market: "swap" }
+
+  trend_timeframe: "4h"      # lọc trend
+  entry_timeframe: "1h"      # tìm entry
+  since: "2023-01-01T00:00:00Z"
+  until: null                # null = đến hiện tại
+  cache_dir: "./data_cache"  # Parquet cache
+
+# ── Chi phí giao dịch (đơn vị: phần thập phân, 0.0004 = 0.04%) ──
+costs:
+  fee_taker: 0.0004          # phí 1 chiều; entry + exit = 2 lần
+  slippage: 0.0005           # trượt giá 1 chiều
+  # Funding tính THEO GIỜ (Hyperliquid interval = 1h). Đây là hằng số
+  # approximation hướng conservative; thay bằng funding history thật ở Phase sau.
+  funding_hourly: 0.0000125  # ~0.00125%/h  ≈ 11%/năm nếu giữ liên tục
+  funding_applies_to: "swap" # chỉ trừ funding với market = swap (perp), spot = 0
+
+# ── Strategy: trend-continuation pullback ──
+strategy:
+  ema_fast: 20
+  ema_mid: 50
+  ema_slow: 200
+  rsi_len: 14
+  rsi_min: 50              # entry yêu cầu RSI > giá trị này
+  atr_len: 14
+  pullback_ema_len: 20     # dùng EMA nào (1H) làm vùng hồi: 20 hay 50
+  pullback_tol: 0.004      # "chạm" = low trong khoảng ±0.4% quanh EMA
+  sl_atr_mult: 2.5         # SL cách entry 2.5*ATR (1H)  [Phase B: nới từ 1.5 -> 2.5]
+  tp_r_mult: 2.0           # TP = 2R (chỉ dùng khi exit_mode = fixed_r)
+  allow_long: true         # bật/tắt chiều mua
+  allow_short: false       # đã thử short -> tệ hơn (bơi ngược bull + squeeze). Tắt.
+  # Lọc volume: chỉ vào khi volume nến > volume_mult * MA(volume).
+  volume_filter: false
+  volume_ma_len: 20
+  volume_mult: 1.0
+
+# ── Lọc regime: chỉ trade khi trend 4H đủ mạnh, bỏ qua lúc sideway ──
+# Đã thử ema_spread_min=0.03 -> KHÔNG hiệu quả (lọc nhầm lệnh cuối sóng). Tắt.
+regime:
+  enabled: false
+  ema_spread_min: 0.03
+
+# ── Chiến lược funding-extreme (hướng b): long khi funding cực âm ──
+funding_strategy:
+  signal: "level"        # level = funding thấp | velocity = funding lao dốc nhanh
+  entry_pct: 0.05        # vào long khi funding <= expanding percentile này [test: siết 10%->5%]
+  exit_pct: 0.50         # thoát khi funding hồi lên trên percentile này (hoặc hết hold)
+  warmup_events: 540     # ~6 tháng (540*8h) đầu bỏ qua để percentile ổn định
+  hold_hours: 72         # giữ tối đa 72h (study cho thấy edge mạnh nhất ở 48-72h)
+  position_frac: 1.0     # % equity mỗi lệnh (1.0 = full, không đòn bẩy)
+
+# ── Thử nghiệm riêng: phân kỳ RSI khung 15m (mean-reversion) ──
+divergence:
+  timeframe: "15m"
+  rsi_len: 14
+  atr_len: 14
+  pivot_k: 3          # đáy/đỉnh = cực trị trong ±3 nến; xác nhận sau 3 nến
+  max_gap: 40         # 2 pivot cách nhau tối đa 40 nến (~10h)
+  sl_atr_mult: 1.5
+  tp_r_mult: 2.0
+  allow_long: true
+  allow_short: true
+
+backtest:
+  initial_equity: 10000
+  risk_per_trade: 0.01     # 1% equity mỗi lệnh (position sizing theo khoảng cách SL)
+  # Khi SL & TP cùng nằm trong 1 nến -> giả định chạm SL trước (worst-case).
+  sl_first_on_ambiguous: true
+  exit_mode: "fixed_r"     # fixed_r = TP cố định 2R | atr_trailing = trailing stop
+  trail_atr_mult: 2.5      # trailing stop cách đỉnh/đáy chạy 2.5*ATR (chỉ dùng khi atr_trailing)
