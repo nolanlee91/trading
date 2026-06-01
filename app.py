@@ -354,25 +354,34 @@ def index() -> str:
 PAGE = """<!doctype html><html lang="vi"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Trader Decision Assistant</title><style>
-*{box-sizing:border-box}body{margin:0;background:#0e1117;color:#e6e6e6;
-font-family:system-ui,Segoe UI,Roboto,sans-serif;padding:16px;max-width:780px;margin:auto}
-h1{font-size:18px;margin:4px 0}h2{font-size:15px;margin:18px 0 6px;color:#9aa4b2}
+*{box-sizing:border-box}body{margin:0 auto;background:#0e1117;color:#e6e6e6;
+font-family:system-ui,Segoe UI,Roboto,sans-serif;padding:14px;max-width:780px;-webkit-text-size-adjust:100%}
+h1{font-size:19px;margin:4px 0}h2{font-size:15px;margin:18px 0 6px;color:#9aa4b2}
 .sub{color:#8b95a5;font-size:12px;margin-bottom:12px}
 .card{background:#161b22;border:1px solid #232a33;border-radius:12px;padding:14px;margin:10px 0}
-.row{display:flex;justify-content:space-between;align-items:center}
-.sym{font-weight:700;font-size:16px}.px{font-variant-numeric:tabular-nums;color:#cbd5e1}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.sym{font-weight:700;font-size:17px}.px{font-variant-numeric:tabular-nums;color:#cbd5e1;font-size:15px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin:8px 0;font-size:13px}
 .k{color:#8b95a5}.bull{color:#3fb950}.bear{color:#f85149}.mixed{color:#d29922}
-.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:12px;font-weight:700}
+.badge{display:inline-block;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700}
 .b-ok{background:#13361f;color:#3fb950}.b-warn{background:#3a3214;color:#d29922}.b-bad{background:#3d1719;color:#f85149}
-.chk{font-size:13px;margin:2px 0}.y{color:#3fb950}.n{color:#f85149}
+.chk{font-size:13px;margin:3px 0}.y{color:#3fb950}.n{color:#f85149}
 .flag{font-size:12px;color:#e3b341;margin:3px 0}
+.read{font-size:13px;margin-top:8px;border-top:1px solid #232a33;padding-top:8px;color:#c9d1d9}
 .warn{background:#1d2530;border-radius:8px;padding:8px;font-size:11px;color:#8b95a5;margin-bottom:12px}
-button{background:#21262d;color:#e6e6e6;border:1px solid #30363d;border-radius:8px;padding:6px 12px;cursor:pointer}
-input,select,textarea{background:#0e1117;color:#e6e6e6;border:1px solid #30363d;border-radius:6px;padding:6px;font-size:13px}
-table{width:100%;border-collapse:collapse;font-size:12px}td,th{border-bottom:1px solid #232a33;padding:5px;text-align:left}
-.form{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+button{background:#21262d;color:#e6e6e6;border:1px solid #30363d;border-radius:8px;padding:11px 14px;font-size:14px;cursor:pointer;min-height:44px}
+input,select,textarea{background:#0e1117;color:#e6e6e6;border:1px solid #30363d;border-radius:8px;padding:10px;font-size:16px;min-height:44px}
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}
+td,th{border-bottom:1px solid #232a33;padding:7px 6px;text-align:left}
+.form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .small{font-size:11px;color:#8b95a5}
+@media(max-width:520px){
+ .grid{grid-template-columns:1fr;gap:4px}
+ .form{flex-direction:column;align-items:stretch}
+ .form>*{width:100%}
+ button{width:100%}
+}
 </style></head><body>
 <h1>🎯 Trader Decision Assistant</h1>
 <div class="sub" id="asof">đang tải...</div>
@@ -447,13 +456,13 @@ async function loadTrades(){
   const act=t.status==='open'?`<button onclick="closeTrade(${t.id})">Đóng</button>`:'';
   h+=`<tr><td>${t.id}</td><td>${t.symbol}</td><td>${t.side}</td><td>${t.ts_open}<br><span class="small">$${t.ctx_price?.toLocaleString()||'?'}</span></td><td class="small">${ctx}</td><td>${pnl}</td><td>${act}</td></tr>`;
  }
- document.getElementById('trades').innerHTML=h+'</table>';
+ document.getElementById('trades').innerHTML='<div class="tw">'+h+'</table></div>';
 }
 async function loadStats(){
  const s=await (await fetch('/api/journal/stats')).json();
  if(!s.n){document.getElementById('stats').textContent='chưa có lệnh đã đóng.';return;}
- const tbl=(o)=>'<table><tr><th>nhóm</th><th>n</th><th>win%</th><th>avg PnL</th></tr>'+
-  Object.entries(o).map(([k,v])=>`<tr><td>${k}</td><td>${v.n}</td><td>${v.win}%</td><td class="${v.avg>0?'y':'n'}">${v.avg>0?'+':''}${v.avg}%</td></tr>`).join('')+'</table>';
+ const tbl=(o)=>'<div class="tw"><table><tr><th>nhóm</th><th>n</th><th>win%</th><th>avg PnL</th></tr>'+
+  Object.entries(o).map(([k,v])=>`<tr><td>${k}</td><td>${v.n}</td><td>${v.win}%</td><td class="${v.avg>0?'y':'n'}">${v.avg>0?'+':''}${v.avg}%</td></tr>`).join('')+'</table></div>';
  let h=`<div class="small">Tổng ${s.n} lệnh đã đóng · win ${s.win}% · avg ${s.avg_pnl}%`;
  h+= s.n<30?' — ⚠️ <30 lệnh, chưa đủ tin.':'';
  h+='</div><h3 style="font-size:13px;margin:10px 0 4px">Theo funding percentile</h3>'+tbl(s.by_funding);
