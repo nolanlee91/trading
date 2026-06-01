@@ -17,36 +17,44 @@ Với mỗi coin (BTC/ETH/SOL), hiển thị:
 
 Mục đích: thấy nhanh khung lớn đang nghiêng chiều nào, đám đông ở đâu, giá có căng không.
 
-## Layer 2 — Risk Score (điểm rủi ro)
+## Bias — đánh THEO trend lớn
 
-Chấm điểm rủi ro **nếu vào lệnh long ngay lúc này**, theo quy tắc cộng điểm:
+Trước khi chấm Risk và Checklist, hệ thống xác định **bias** theo trend 4H:
+- 4H bullish → **bias LONG** (chỉ xét mua thuận trend).
+- 4H bearish → **bias SHORT** (chỉ xét bán thuận trend).
+- 4H mixed → **ĐỨNG NGOÀI** (không có lợi thế rõ).
 
-| Điều kiện | Điểm |
-|---|---|
-| Funding ≥ 95 percentile (đám đông long cực đông) | +2 |
-| RSI ≥ 75 (quá mua) | +2 |
-| Giá ≥ 2 ATR trên EMA20 (quá căng) | +3 |
-| Trend 4H lẫn lộn (mixed) | +2 |
-| Trend 4H giảm (bearish) | +2 |
+Nguyên tắc rút ra từ nghiên cứu: *đừng đánh ngược trend lớn*. Vì vậy Risk Score và
+Checklist đều **xoay theo bias**, không cứng cho long.
 
-Tổng điểm → phân loại:
-- **0-2: Bình thường**
-- **3-5: Cẩn thận**
-- **6+: Rủi ro cao**
+## Layer 2 — Risk Score (điểm rủi ro vào lệnh THEO BIAS)
 
-Kèm theo lý do vì sao điểm cao (vd "RSI >75", "giá >2 ATR trên EMA20"). Đây là cảnh báo "đừng FOMO" được định lượng.
+Chấm điểm rủi ro nếu vào lệnh **đúng theo bias** ngay lúc này:
 
-## Layer 3 — Checklist (danh sách kiểm tra)
+**Khi bias LONG** (uptrend): funding ≥95pct (+2, đám đông long), RSI ≥75 (+2, quá mua),
+giá ≥2 ATR TRÊN EMA20 (+3, căng lên dễ hồi), 1D bearish ngược bias (+2).
 
-Thay vì phán "LONG", hệ thống hiện các điều kiện thuận lợi cho lệnh long dưới dạng ✓/✗:
+**Khi bias SHORT** (downtrend): funding ≤5pct (+2, đám đông short → dễ squeeze lên),
+RSI ≤25 (+2, quá bán → dễ nảy), giá ≤-2 ATR DƯỚI EMA20 (+3, căng xuống dễ hồi lên),
+1D bullish ngược bias (+2).
 
-- ✓/✗ 4H bullish
-- ✓/✗ 1D không bearish
-- ✓/✗ Giá gần/dưới EMA20 (đang pullback, không đu đỉnh)
-- ✓/✗ RSI không quá nóng (<70)
-- ✓/✗ Funding không đông long (<85 percentile)
+**Khi ĐỨNG NGOÀI:** mặc định điểm cao (không có bias).
 
-Rồi đếm: ví dụ "**3/5 thuận lợi**". Người dùng tự cân nhắc có đủ điều kiện theo kế hoạch của mình không. Giống checklist trước khi cất cánh — buộc nhìn đủ yếu tố thay vì cảm tính.
+Tổng → **0-2 Bình thường · 3-5 Cẩn thận · 6+ Rủi ro cao**, kèm lý do. Đây là cảnh báo
+"đừng vào lệnh sai thời điểm" được định lượng (cả FOMO mua đỉnh lẫn đuổi bán đáy).
+
+## Layer 3 — Checklist (theo BIAS)
+
+Hiện các điều kiện thuận lợi để vào lệnh **thuận trend** dưới dạng ✓/✗, rồi đếm X/5.
+
+**Bias LONG:** 4H bullish · 1D không bearish · giá gần/dưới EMA20 (pullback để mua) ·
+RSI không quá nóng (<70) · funding không đông long (<85pct).
+
+**Bias SHORT:** 4H bearish · 1D không bullish · giá gần/trên EMA20 (hồi lên kháng cự để
+bán) · RSI không quá bán (>30) · funding không đông short (>15pct).
+
+Lưu ý điều kiện vào lệnh đúng: trong downtrend, điểm bán đẹp là **khi giá hồi LÊN kháng
+cự** (EMA20), không phải đuổi bán khi giá đã căng xuống. Checklist phản ánh đúng điều này.
 
 ## Layer 4 — Journal (nhật ký) — phần có giá trị thật nhất
 

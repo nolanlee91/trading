@@ -106,23 +106,44 @@ def analyze_coin(spot: str, perp: str, force: bool) -> dict:
     ann = f_now * 3 * 365 * 100
     vel = "tăng" if fund["funding"].iloc[-9:].mean() > fund["funding"].iloc[-18:-9].mean() else "giảm"
 
-    # ── L2: Risk score (rủi ro khi vào LONG ngay) ──
+    # Bias = đánh THEO trend 4H (đừng đánh ngược trend lớn).
+    bias = "long" if t4 == "bullish" else "short" if t4 == "bearish" else "neutral"
+
+    # ── L2: Risk score — rủi ro khi vào lệnh THEO BIAS ngay bây giờ ──
     risk, why = 0, []
-    if f_pctl >= 95: risk += 2; why.append("funding >95pct")
-    if r_now >= 75: risk += 2; why.append("RSI >75")
-    if dist_atr >= 2: risk += 3; why.append("giá >2 ATR trên EMA20")
-    if t4 == "mixed": risk += 2; why.append("trend 4H không rõ")
-    if t4 == "bearish": risk += 2; why.append("trend 4H bearish")
+    if bias == "long":
+        if f_pctl >= 95: risk += 2; why.append("funding >95pct (đông long)")
+        if r_now >= 75: risk += 2; why.append("RSI >75 (quá mua)")
+        if dist_atr >= 2: risk += 3; why.append("giá >2 ATR TRÊN EMA20 (căng lên, dễ hồi xuống)")
+        if t1d == "bearish": risk += 2; why.append("1D ngược bias (bearish)")
+    elif bias == "short":
+        if f_pctl <= 5: risk += 2; why.append("funding <5pct (đông short -> dễ squeeze LÊN)")
+        if r_now <= 25: risk += 2; why.append("RSI <25 (quá bán -> dễ nảy lên)")
+        if dist_atr <= -2: risk += 3; why.append("giá <-2 ATR DƯỚI EMA20 (căng xuống, dễ hồi lên)")
+        if t1d == "bullish": risk += 2; why.append("1D ngược bias (bullish)")
+    else:
+        risk = 6; why.append("trend 4H không rõ -> không có bias, nên đứng ngoài")
     band = "Bình thường" if risk <= 2 else ("Cẩn thận" if risk <= 5 else "Rủi ro cao")
 
-    # ── L3: Checklist (điều kiện thuận lợi cho LONG) ──
-    checklist = [
-        {"label": "4H bullish", "ok": t4 == "bullish"},
-        {"label": "1D không bearish", "ok": t1d != "bearish"},
-        {"label": "Giá gần/dưới EMA20 (pullback)", "ok": dist_atr < 0.5},
-        {"label": "RSI không quá nóng (<70)", "ok": r_now < 70},
-        {"label": "Funding không đông long (<85pct)", "ok": f_pctl < 85},
-    ]
+    # ── L3: Checklist theo BIAS (điều kiện thuận lợi để vào lệnh thuận trend) ──
+    if bias == "long":
+        checklist = [
+            {"label": "4H bullish", "ok": t4 == "bullish"},
+            {"label": "1D không bearish", "ok": t1d != "bearish"},
+            {"label": "Giá gần/dưới EMA20 (pullback để mua)", "ok": dist_atr < 0.5},
+            {"label": "RSI không quá nóng (<70)", "ok": r_now < 70},
+            {"label": "Funding không đông long (<85pct)", "ok": f_pctl < 85},
+        ]
+    elif bias == "short":
+        checklist = [
+            {"label": "4H bearish", "ok": t4 == "bearish"},
+            {"label": "1D không bullish", "ok": t1d != "bullish"},
+            {"label": "Giá gần/trên EMA20 (hồi lên kháng cự để bán)", "ok": dist_atr > -0.5},
+            {"label": "RSI không quá bán (>30)", "ok": r_now > 30},
+            {"label": "Funding không đông short (>15pct)", "ok": f_pctl > 15},
+        ]
+    else:
+        checklist = [{"label": "Trend 4H rõ ràng (bull/bear)", "ok": False}]
     n_ok = sum(1 for c in checklist if c["ok"])
 
     flags = []
@@ -140,7 +161,7 @@ def analyze_coin(spot: str, perp: str, force: bool) -> dict:
             "ret7": round(ret7 * 100, 1), "funding": round(f_now * 100, 4),
             "funding_ann": round(ann, 0), "funding_pctl": round(f_pctl, 0),
             "funding_vel": vel, "atr_pct": round(atr_v / px * 100, 1),
-            "risk_score": risk, "risk_band": band, "risk_why": why,
+            "bias": bias, "risk_score": risk, "risk_band": band, "risk_why": why,
             "checklist": checklist, "checklist_ok": n_ok, "checklist_n": len(checklist),
             "flags": flags}
 
@@ -387,21 +408,24 @@ Giá trị thật nằm ở JOURNAL: ghi lệnh của chính anh để tìm EDGE
 <script>
 const cls=t=>t==='bullish'?'bull':t==='bearish'?'bear':'mixed';
 const bandCls=b=>b==='Bình thường'?'b-ok':b==='Cẩn thận'?'b-warn':'b-bad';
+const biasCls=b=>b==='long'?'b-ok':b==='short'?'b-bad':'b-warn';
+const biasTxt=b=>b==='long'?'BIAS: LONG':b==='short'?'BIAS: SHORT':'BIAS: ĐỨNG NGOÀI';
 function card(c){
  if(c.error)return `<div class="card"><span class="sym">${c.symbol}</span> — lỗi: ${c.error}</div>`;
  const chk=c.checklist.map(x=>`<div class="chk"><span class="${x.ok?'y':'n'}">${x.ok?'✓':'✗'}</span> ${x.label}</div>`).join('');
  const flags=(c.flags||[]).map(f=>`<div class="flag">• ${f}</div>`).join('');
  return `<div class="card">
   <div class="row"><span class="sym">${c.symbol}</span>
-   <span><span class="badge ${bandCls(c.risk_band)}">Risk ${c.risk_score} · ${c.risk_band}</span>
-   &nbsp;<span class="px">$${c.price.toLocaleString()}</span></span></div>
+   <span class="px">$${c.price.toLocaleString()}</span></div>
+  <div style="margin:6px 0"><span class="badge ${biasCls(c.bias)}">${biasTxt(c.bias)}</span>
+   &nbsp;<span class="badge ${bandCls(c.risk_band)}">Risk vào lệnh ${c.risk_score} · ${c.risk_band}</span></div>
   <div class="grid">
    <div><span class="k">Trend 4H/1D:</span> <span class="${cls(c.trend_4h)}">${c.trend_4h}</span> / <span class="${cls(c.trend_1d)}">${c.trend_1d}</span></div>
    <div><span class="k">Giá vs EMA20:</span> ${c.dist_atr>0?'+':''}${c.dist_atr} ATR</div>
    <div><span class="k">RSI / 7d:</span> ${c.rsi} / ${c.ret7>0?'+':''}${c.ret7}%</div>
    <div><span class="k">Funding:</span> ${c.funding_pctl}pct (${c.funding_vel})</div>
   </div>
-  <div class="small">Checklist long: ${c.checklist_ok}/${c.checklist_n} thuận lợi</div>
+  <div class="small">Checklist ${c.bias==='long'?'mua':c.bias==='short'?'bán':'(chưa có bias)'}: ${c.checklist_ok}/${c.checklist_n} thuận lợi</div>
   ${chk}${flags}</div>`;
 }
 async function loadDash(force){
