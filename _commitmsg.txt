@@ -1,6 +1,0 @@
-UX: nut Refresh data hien trang thai dang lam moi
-
-- loadDash: khi bam refresh, hien "dang keo data moi ~30-60s" + disable nut, xong moi cap nhat
-- Truoc day refetch ~30-60s nhung khong co feedback nen trong nhu dung im
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
