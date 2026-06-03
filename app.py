@@ -337,6 +337,25 @@ async def journal_close(req: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "pnl_pct": round(pnl * 100, 2)})
 
 
+@app.post("/api/journal/manual")
+async def journal_manual(req: Request) -> JSONResponse:
+    """Ghi 1 lệnh ĐÃ ĐÓNG nhập tay (entry/exit thật) — cho lệnh quá khứ/ngoài app."""
+    b = await req.json()
+    side = b.get("side", "short")
+    entry, exitp = float(b["entry"]), float(b["exit"])
+    pnl = (exitp / entry - 1) if side == "long" else (entry / exitp - 1)
+    ctx = _ctx_for(b.get("symbol", "")) or {}
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M")
+    sql = ("INSERT INTO trades(ts_open,symbol,side,reason,ctx_price,ctx_funding_pctl,"
+           "ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,ts_close,exit_price,pnl_pct,status) "
+           f"VALUES({','.join([PH] * 13)},'closed')")
+    params = (now, b.get("symbol", ""), side, b.get("reason", "") + " [nhập tay]",
+              entry, ctx.get("funding_pctl"), ctx.get("trend_4h"), ctx.get("trend_1d"),
+              ctx.get("rsi"), ctx.get("dist_atr"), now, exitp, round(pnl * 100, 2))
+    rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
+    return JSONResponse({"id": rid, "pnl_pct": round(pnl * 100, 2)})
+
+
 @app.get("/api/journal")
 def journal_list() -> JSONResponse:
     return JSONResponse(run_query("SELECT * FROM trades ORDER BY id DESC"))
@@ -434,6 +453,16 @@ Giá trị thật nằm ở JOURNAL: ghi lệnh của chính anh để tìm EDGE
  <button onclick="openTrade()">＋ Ghi lệnh (chụp context hiện tại)</button>
 </div><div class="small">Khi ghi, hệ thống tự lưu trend/funding/RSI/EMA tại thời điểm này.</div></div>
 
+<div class="card"><div class="small" style="margin-bottom:6px">Hoặc ghi lệnh ĐÃ ĐÓNG (nhập tay entry/exit thật — cho lệnh quá khứ):</div>
+<div class="form">
+ <select id="m-sym"><option>ETH/USDT</option><option>BTC/USDT</option><option>SOL/USDT</option></select>
+ <select id="m-side"><option>short</option><option>long</option></select>
+ <input id="m-entry" inputmode="decimal" placeholder="Giá vào (vd 2080)">
+ <input id="m-exit" inputmode="decimal" placeholder="Giá ra (vd 1912)">
+ <input id="m-reason" placeholder="Ghi chú" style="flex:1;min-width:140px">
+ <button onclick="logManual()">✓ Ghi lệnh đã đóng</button>
+</div></div>
+
 <h2>📈 Lệnh & PnL</h2>
 <div class="card" id="trades">chưa có lệnh.</div>
 
@@ -497,10 +526,18 @@ async function loadStats(){
  h+='<h3 style="font-size:13px;margin:10px 0 4px">Theo RSI</h3>'+tbl(s.by_rsi);
  document.getElementById('stats').innerHTML=h;
 }
+const byId=id=>document.getElementById(id);
 async function openTrade(){
- const body={symbol:j_sym.value,side:j_side.value,reason:j_reason.value};
+ const body={symbol:byId('j-sym').value,side:byId('j-side').value,reason:byId('j-reason').value};
  await fetch('/api/journal/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
- j_reason.value='';loadTrades();loadStats();
+ byId('j-reason').value='';loadTrades();loadStats();
+}
+async function logManual(){
+ const entry=parseFloat(byId('m-entry').value),exit=parseFloat(byId('m-exit').value);
+ if(!entry||!exit){alert('Nhập giá vào & giá ra');return;}
+ await fetch('/api/journal/manual',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({symbol:byId('m-sym').value,side:byId('m-side').value,entry,exit,reason:byId('m-reason').value})});
+ byId('m-entry').value='';byId('m-exit').value='';byId('m-reason').value='';loadTrades();loadStats();
 }
 async function closeTrade(id){
  const px=prompt('Giá thoát?');if(!px)return;
