@@ -33,8 +33,26 @@ from data import fetch_ohlcv
 from data_funding import fetch_funding
 from indicators import atr, ema, rsi
 
-PAIRS = [("BTC/USDT", "BTC/USDT:USDT"), ("ETH/USDT", "ETH/USDT:USDT"),
-         ("SOL/USDT", "SOL/USDT:USDT")]
+# Coin theo BASE asset; nhãn hiển thị (cũng là key journal) giữ ổn định để không
+# phá các lệnh đã ghi. HYPE chỉ có trên Hyperliquid (sàn user trade thật).
+COINS = ["BTC", "ETH", "SOL", "HYPE"]
+DISPLAY = {"BTC": "BTC/USDT", "ETH": "ETH/USDT", "SOL": "SOL/USDT", "HYPE": "HYPE/USDC"}
+
+# Mỗi sàn: cách dựng symbol OHLCV/funding từ base, loại market, và CHU KỲ FUNDING
+# (giờ) — Hyperliquid trả funding mỗi 1h, các sàn perp khác 8h. Chu kỳ này quyết
+# định cách quy đổi sang %/năm và cửa sổ đo vận tốc funding.
+EXCHANGE_PROFILES = {
+    # Hyperliquid: dùng chính symbol perp USDC cho cả giá lẫn funding (đúng sàn user đánh).
+    "hyperliquid": {"ohlcv": lambda b: f"{b}/USDC:USDC", "funding": lambda b: f"{b}/USDC:USDC",
+                    "market": "swap", "funding_h": 1},
+    "bybit":   {"ohlcv": lambda b: f"{b}/USDT", "funding": lambda b: f"{b}/USDT:USDT",
+                "market": "spot", "funding_h": 8},
+    "binance": {"ohlcv": lambda b: f"{b}/USDT", "funding": lambda b: f"{b}/USDT:USDT",
+                "market": "spot", "funding_h": 8},
+    "okx":     {"ohlcv": lambda b: f"{b}/USDT", "funding": lambda b: f"{b}/USDT:USDT",
+                "market": "spot", "funding_h": 8},
+}
+
 CACHE = "./data_cache"
 LOOKBACK_DAYS = 450
 FUNDING_PCT_DAYS = 365
@@ -42,10 +60,10 @@ DB_PATH = os.environ.get("DB_PATH", "journal.db")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")          # đặt biến môi trường, KHÔNG hardcode
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 
-# Binance hay bị chặn 451 ở một số mạng (công ty/cloud). Tự dò sàn vào được.
-# Ép 1 sàn cụ thể bằng env DATA_EXCHANGE; mặc định thử Bybit → Binance → OKX.
+# Ưu tiên Hyperliquid (sàn user trade) → fallback proxy nếu HL không vào được
+# (Binance hay bị 451 ở mạng công ty/cloud). Ép 1 sàn bằng env DATA_EXCHANGE.
 DATA_EXCHANGES = ([os.environ["DATA_EXCHANGE"]] if os.environ.get("DATA_EXCHANGE")
-                  else ["bybit", "binance", "okx"])
+                  else ["hyperliquid", "bybit", "binance", "okx"])
 _RESOLVED_EX = None
 
 # Journal: dùng PostgreSQL nếu có DATABASE_URL (Railway -> dùng chung mọi thiết bị,
@@ -75,13 +93,17 @@ def _since(days: int) -> str:
 
 
 def data_exchange() -> str:
-    """Dò 1 lần sàn nào vào được (tránh 451 Binance), cache lại kết quả."""
+    """Dò 1 lần sàn nào vào được (ưu tiên Hyperliquid, tránh 451 Binance), cache lại."""
     global _RESOLVED_EX
     if _RESOLVED_EX:
         return _RESOLVED_EX
     for name in DATA_EXCHANGES:
+        prof = EXCHANGE_PROFILES.get(name)
+        if not prof:
+            continue
         try:
-            getattr(ccxt, name)({"enableRateLimit": True}).fetch_ohlcv("BTC/USDT", "4h", limit=1)
+            probe = prof["ohlcv"]("BTC")     # symbol BTC theo đúng quy ước sàn đó
+            getattr(ccxt, name)({"enableRateLimit": True}).fetch_ohlcv(probe, "4h", limit=1)
             _RESOLVED_EX = name
             return name
         except Exception:
@@ -90,13 +112,20 @@ def data_exchange() -> str:
     return _RESOLVED_EX
 
 
-def analyze_coin(spot: str, perp: str, force: bool) -> dict:
+def analyze_coin(symbol: str, force: bool) -> dict:
+    """symbol = nhãn hiển thị (vd 'BTC/USDT'); base lấy phần trước '/'."""
+    base = symbol.split("/")[0]
     ex = data_exchange()
-    fb = dict(symbol=spot, exchange=ex, market="spot",
+    prof = EXCHANGE_PROFILES[ex]
+    fund_h = prof["funding_h"]                       # chu kỳ funding của sàn (giờ)
+    ohlcv_sym = prof["ohlcv"](base)
+    fund_sym = prof["funding"](base)
+
+    fb = dict(symbol=ohlcv_sym, exchange=ex, market=prof["market"],
               since=_since(LOOKBACK_DAYS), until=None, cache_dir=CACHE, force=force)
     h4 = fetch_ohlcv(timeframe="4h", **fb)
     d1 = fetch_ohlcv(timeframe="1d", **fb)
-    fund = fetch_funding(perp, ex, _since(FUNDING_PCT_DAYS + 30), None, CACHE, force=force)
+    fund = fetch_funding(fund_sym, ex, _since(FUNDING_PCT_DAYS + 30), None, CACHE, force=force)
 
     e20 = ema(h4["close"], 20); e50 = ema(h4["close"], 50); e200 = ema(h4["close"], 200)
     r = rsi(h4["close"], 14); a = atr(h4["high"], h4["low"], h4["close"], 14)
@@ -111,8 +140,13 @@ def analyze_coin(spot: str, perp: str, force: bool) -> dict:
     f_win = fund[fund["time"] >= fund["time"].max() - dt.timedelta(days=FUNDING_PCT_DAYS)]
     f_now = float(fund["funding"].iloc[-1])
     f_pctl = float((f_win["funding"] < f_now).mean() * 100)
-    ann = f_now * 3 * 365 * 100
-    vel = "tăng" if fund["funding"].iloc[-9:].mean() > fund["funding"].iloc[-18:-9].mean() else "giảm"
+    # %/năm = rate mỗi kỳ × số kỳ/ngày × 365. Số kỳ/ngày = 24/chu_kỳ_giờ (HL 1h→24, perp 8h→3).
+    ann = f_now * (24 / fund_h) * 365 * 100
+    # Vận tốc: so trung bình ~3 ngày gần nhất với 3 ngày trước đó (cùng horizon mọi sàn).
+    w = max(2, round(3 * 24 / fund_h))               # số điểm funding ~ 3 ngày
+    fr = fund["funding"]
+    vel = ("tăng" if len(fr) >= 2 * w and fr.iloc[-w:].mean() > fr.iloc[-2 * w:-w].mean()
+           else "giảm")
 
     # Bias = đánh THEO trend 4H (đừng đánh ngược trend lớn).
     bias = "long" if t4 == "bullish" else "short" if t4 == "bearish" else "neutral"
@@ -164,7 +198,7 @@ def analyze_coin(spot: str, perp: str, force: bool) -> dict:
     elif dist_atr <= -1.5:
         flags.append(f"Giá {dist_atr:.1f} ATR dưới EMA20 — quá bán ngắn hạn")
 
-    return {"symbol": spot, "price": px, "trend_4h": t4, "trend_1d": t1d,
+    return {"symbol": symbol, "price": px, "trend_4h": t4, "trend_1d": t1d,
             "dist_atr": round(dist_atr, 2), "rsi": round(r_now, 0),
             "ret7": round(ret7 * 100, 1), "funding": round(f_now * 100, 4),
             "funding_ann": round(ann, 0), "funding_pctl": round(f_pctl, 0),
@@ -176,11 +210,12 @@ def analyze_coin(spot: str, perp: str, force: bool) -> dict:
 
 def refresh(force: bool = True) -> None:
     coins = []
-    for spot, perp in PAIRS:
+    for base in COINS:
+        label = DISPLAY[base]
         try:
-            coins.append(analyze_coin(spot, perp, force))
+            coins.append(analyze_coin(label, force))
         except Exception as e:
-            coins.append({"symbol": spot, "error": str(e)})
+            coins.append({"symbol": label, "error": str(e)})
     with _LOCK:
         SNAPSHOT["coins"] = coins
         SNAPSHOT["asof"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -447,7 +482,7 @@ Giá trị thật nằm ở JOURNAL: ghi lệnh của chính anh để tìm EDGE
 
 <h2>📓 Journal — ghi lệnh</h2>
 <div class="card"><div class="form">
- <select id="j-sym"><option>BTC/USDT</option><option>ETH/USDT</option><option>SOL/USDT</option></select>
+ <select id="j-sym"><option>BTC/USDT</option><option>ETH/USDT</option><option>SOL/USDT</option><option>HYPE/USDC</option></select>
  <select id="j-side"><option>long</option><option>short</option></select>
  <input id="j-reason" placeholder="Lý do vào (vd: pullback EMA20, funding âm)" style="flex:1;min-width:180px">
  <button onclick="openTrade()">＋ Ghi lệnh (chụp context hiện tại)</button>
@@ -455,7 +490,7 @@ Giá trị thật nằm ở JOURNAL: ghi lệnh của chính anh để tìm EDGE
 
 <div class="card"><div class="small" style="margin-bottom:6px">Hoặc ghi lệnh ĐÃ ĐÓNG (nhập tay entry/exit thật — cho lệnh quá khứ):</div>
 <div class="form">
- <select id="m-sym"><option>ETH/USDT</option><option>BTC/USDT</option><option>SOL/USDT</option></select>
+ <select id="m-sym"><option>ETH/USDT</option><option>BTC/USDT</option><option>SOL/USDT</option><option>HYPE/USDC</option></select>
  <select id="m-side"><option>short</option><option>long</option></select>
  <input id="m-entry" inputmode="decimal" placeholder="Giá vào (vd 2080)">
  <input id="m-exit" inputmode="decimal" placeholder="Giá ra (vd 1912)">
