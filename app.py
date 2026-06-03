@@ -250,7 +250,7 @@ def analyze_coin(symbol: str, force: bool) -> dict:
             "flags": flags}
 
 
-def refresh(force: bool = True) -> None:
+def refresh(force: bool = False) -> None:
     coins = []
     for base in COINS:
         label = DISPLAY[base]
@@ -264,6 +264,27 @@ def refresh(force: bool = True) -> None:
         SNAPSHOT["status"] = "ok"
         SNAPSHOT["source"] = _RESOLVED_EX or "?"
     snapshot_daily(coins)   # N-4: chụp bối cảnh 1 lần/ngày (idempotent)
+
+
+_REFRESHING = False
+
+
+def trigger_refresh() -> None:
+    """Kích refresh CHẠY NỀN (không block request). Tránh nút Refresh treo 30-60s ->
+    frontend timeout -> hiện nhầm 'backend unreachable'. Chỉ 1 lần chạy đồng thời."""
+    global _REFRESHING
+    if _REFRESHING:
+        return
+    _REFRESHING = True
+
+    def _run():
+        global _REFRESHING
+        try:
+            refresh()
+        finally:
+            _REFRESHING = False
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _ctx_for(symbol: str) -> dict:
@@ -508,11 +529,11 @@ def _startup() -> None:
 @app.get("/api/dashboard")
 def api_dashboard(refresh_now: bool = False) -> JSONResponse:
     if refresh_now:
-        refresh()
+        trigger_refresh()       # chạy nền, trả ngay snapshot hiện có
     with _LOCK:
         asof = _iso((SNAPSHOT.get("asof") or "").replace(" UTC", ""))
         out = {"asof": asof, "status": SNAPSHOT.get("status"),
-               "source": SNAPSHOT.get("source"),
+               "source": SNAPSHOT.get("source"), "refreshing": _REFRESHING,
                "coins": [_coin_view(c) for c in SNAPSHOT.get("coins", [])]}
     return JSONResponse(out)
 

@@ -716,7 +716,7 @@ const hm = iso=>{ try{ return new Date(iso).toLocaleTimeString("en-US",{hour:"2-
 function toast(msg,kind){ const t=$("#toast"); t.textContent=msg; t.className="toast show "+(kind||""); clearTimeout(t._t); t._t=setTimeout(()=>t.className="toast",2400); }
 
 async function api(path,opts){
-  const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),4500);
+  const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(),8000);
   try{
     const r=await fetch(path,Object.assign({signal:ctrl.signal,headers:{"Content-Type":"application/json"}},opts));
     clearTimeout(to);
@@ -968,8 +968,19 @@ function renderCoins(coins){
 /* ============================================================
    DATA LOAD
    ============================================================ */
+function applyDash(data){
+  state.dashboard=data;
+  renderMatrix(data.coins||[]);
+  renderCoins(data.coins||[]);
+  fillSymbolSelects(data.coins||[]);
+  $("#asof").textContent = hm(data.asof);
+  const src=$("#source");
+  src.textContent = state.usingMock ? "mock data" : (data.source||"live");
+  src.className = "src-pill"+(state.usingMock?" stale":"");
+}
 async function loadDashboard(refresh){
-  const btn=$("#refreshBtn"); btn.dataset.state="loading";
+  const btn=$("#refreshBtn"); if(refresh) btn.dataset.state="loading";
+  const prevAsof = state.dashboard && state.dashboard.asof;
   let data;
   try{
     data=await api(`/api/dashboard?refresh_now=${refresh?"true":"false"}`);
@@ -977,17 +988,22 @@ async function loadDashboard(refresh){
   }catch(e){
     data=MOCK.dashboard(); state.usingMock=true;
   }
-  state.dashboard=data;
-  renderMatrix(data.coins);
-  renderCoins(data.coins);
-  fillSymbolSelects(data.coins);
-  $("#asof").textContent = hm(data.asof);
-  const src=$("#source");
-  src.textContent = state.usingMock ? "mock data" : (data.source||"live");
-  src.className = "src-pill"+(state.usingMock?" stale":"");
-  btn.dataset.state = state.usingMock ? "error" : "success";
-  setTimeout(()=>btn.dataset.state="idle",1400);
-  if(state.usingMock && refresh) toast("Backend unreachable — showing mock data","err");
+  applyDash(data);
+  if(state.usingMock){
+    if(refresh){ btn.dataset.state="error"; setTimeout(()=>btn.dataset.state="idle",1400);
+                 toast("Backend unreachable — showing mock data","err"); }
+    return;
+  }
+  // Server refresh chạy NỀN -> poll tới khi data mới về (asof đổi) hoặc hết ~90s.
+  if(refresh && data.refreshing){
+    for(let i=0;i<30;i++){
+      await new Promise(r=>setTimeout(r,3000));
+      let d; try{ d=await api("/api/dashboard?refresh_now=false"); }catch(e){ continue; }
+      state.usingMock=false; applyDash(d);
+      if(d.asof && d.asof!==prevAsof && !d.refreshing) break;
+    }
+  }
+  if(refresh){ btn.dataset.state="success"; setTimeout(()=>btn.dataset.state="idle",1400); }
 }
 
 function fillSymbolSelects(coins){
@@ -1188,6 +1204,9 @@ function wire(){
 /* ---------------- boot ---------------- */
 wire();
 loadDashboard(false);
+// Tự poll nền mỗi 45s: cập nhật khi refresh nền xong + tự hồi phục nếu backend
+// tạm gián đoạn (vd Railway redeploy) -> hết kẹt ở "mock data".
+setInterval(()=>loadDashboard(false),45000);
 
 })();
 </script>

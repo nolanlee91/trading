@@ -21,12 +21,22 @@ _TF_MS = {
 }
 
 
+_EX_CACHE: dict = {}
+
+
 def _exchange(name: str, market: str) -> ccxt.Exchange:
-    klass = getattr(ccxt, name)
-    opts = {"enableRateLimit": True}
-    if market in ("swap", "future"):
-        opts["options"] = {"defaultType": "swap"}
-    return klass(opts)
+    """Tái dùng instance theo (sàn, market) -> load_markets() chỉ chạy 1 lần (Hyperliquid
+    load cả sàn rất chậm; tạo mới mỗi call khiến refresh chậm hàng chục giây)."""
+    key = (name, market)
+    ex = _EX_CACHE.get(key)
+    if ex is None:
+        klass = getattr(ccxt, name)
+        opts = {"enableRateLimit": True}
+        if market in ("swap", "future"):
+            opts["options"] = {"defaultType": "swap"}
+        ex = klass(opts)
+        _EX_CACHE[key] = ex
+    return ex
 
 
 def _cache_path(cache_dir: str, exchange: str, symbol: str, tf: str) -> Path:
@@ -46,20 +56,27 @@ def fetch_ohlcv(
 ) -> pd.DataFrame:
     """Tải OHLCV (paginate qua giới hạn 1000 nến/req của sàn). Cache Parquet."""
     path = _cache_path(cache_dir, exchange, symbol, timeframe)
+
+    # TĂNG DẦN (incremental): nếu đã có cache và không ép rebuild, chỉ kéo nến MỚI
+    # từ mốc cuối cache trở đi rồi nối — tránh tải lại 450 ngày mỗi lần (rất chậm).
+    cached = None
     if path.exists() and not force:
-        df = pd.read_parquet(path)
-        return _trim(df, since, until)
+        cached = pd.read_parquet(path)
 
     ex = _exchange(exchange, market)
     ex.load_markets()
     tf_ms = _TF_MS[timeframe]
-    since_ms = ex.parse8601(since)
     until_ms = ex.parse8601(until) if until else ex.milliseconds()
+    if cached is not None and len(cached):
+        # bắt đầu từ nến cuối (kéo lại để cập nhật nến đang hình thành + nến mới)
+        start_ms = int(cached["time"].iloc[-1].value // 1_000_000)
+    else:
+        start_ms = ex.parse8601(since)
 
     # Phân trang tới khi chạm hiện tại. KHÔNG dùng "len(batch)<limit -> break" vì
     # nhiều sàn (Bybit/OKX) giới hạn ~200 nến/lần -> sẽ dừng sớm và trả data CŨ.
     rows: list[list] = []
-    cursor = since_ms
+    cursor = start_ms
     last_ts = None
     while cursor < until_ms:
         batch = ex.fetch_ohlcv(symbol, timeframe, since=cursor, limit=1000)
@@ -73,9 +90,13 @@ def fetch_ohlcv(
         cursor = newest + tf_ms
         time.sleep(ex.rateLimit / 1000)
 
-    df = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
-    df = df.drop_duplicates(subset="time").sort_values("time").reset_index(drop=True)
-    df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
+    new = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "volume"])
+    new["time"] = pd.to_datetime(new["time"], unit="ms", utc=True)
+    if cached is not None and len(cached):
+        df = pd.concat([cached, new], ignore_index=True)
+    else:
+        df = new
+    df = df.drop_duplicates(subset="time", keep="last").sort_values("time").reset_index(drop=True)
 
     os.makedirs(cache_dir, exist_ok=True)
     df.to_parquet(path, index=False)
