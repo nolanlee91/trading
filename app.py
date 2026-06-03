@@ -178,6 +178,9 @@ def analyze_coin(symbol: str, force: bool) -> dict:
     fr = fund["funding"]
     vel = ("tăng" if len(fr) >= 2 * w and fr.iloc[-w:].mean() > fr.iloc[-2 * w:-w].mean()
            else "giảm")
+    # Velocity dạng SỐ (đổi annualized %/năm giữa 2 cửa sổ ~3 ngày) cho UI.
+    vel_num = (round((fr.iloc[-w:].mean() - fr.iloc[-2 * w:-w].mean()) * (24 / fund_h) * 365 * 100, 2)
+               if len(fr) >= 2 * w else 0.0)
 
     # Bias = đánh THEO trend 4H (đừng đánh ngược trend lớn).
     bias = "long" if t4 == "bullish" else "short" if t4 == "bearish" else "neutral"
@@ -239,7 +242,7 @@ def analyze_coin(symbol: str, force: bool) -> dict:
             "dist_atr": round(dist_atr, 2), "rsi": round(r_now, 0),
             "ret7": round(ret7 * 100, 1), "funding": round(f_now * 100, 4),
             "funding_ann": round(ann, 0), "funding_pctl": round(f_pctl, 0),
-            "funding_vel": vel, "atr_pct": round(atr_v / px * 100, 1),
+            "funding_vel": vel, "funding_vel_num": vel_num, "atr_pct": round(atr_v / px * 100, 1),
             "vol_ratio": vol_ratio, "to_high": to_high, "to_low": to_low, "corr_btc": corr_btc,
             "bias": bias, "risk_score": risk, "risk_band": band, "risk_why": why,
             "checklist": checklist, "checklist_ok": n_ok, "checklist_n": len(checklist),
@@ -413,6 +416,47 @@ def _vol_bucket(v):
     return "thấp<0.8" if v < 0.8 else "BT0.8-1.5" if v < 1.5 else "cao1.5-2.5" if v < 2.5 else "spike>2.5"
 
 
+# ── Lớp dịch cho UI (index.html): nội bộ dùng tiếng Việt/bullish, UI cần từ vựng riêng ──
+_TREND_UI = {"bullish": "up", "bearish": "down", "mixed": "flat"}
+_BIAS_UI = {"long": "LONG", "short": "SHORT", "neutral": "NEUTRAL"}
+_BAND_UI = {"Bình thường": "low", "Cẩn thận": "medium", "Rủi ro cao": "high"}
+
+
+def _iso(ts: str) -> str:
+    """'2026-06-02 15:49' (UTC) -> ISO '2026-06-02T15:49:00Z' để JS new Date() đọc đúng."""
+    if not ts:
+        return ts
+    t = ts.replace(" ", "T")
+    if len(t) == 16:           # thiếu giây
+        t += ":00"
+    return t + ("Z" if not t.endswith("Z") else "")
+
+
+def _coin_view(c: dict) -> dict:
+    """Dịch 1 coin trong SNAPSHOT sang từ vựng UI."""
+    if c.get("error"):
+        return {"symbol": c.get("symbol"), "error": c["error"]}
+    v = dict(c)
+    v["trend_4h"] = _TREND_UI.get(c.get("trend_4h"), "flat")
+    v["trend_1d"] = _TREND_UI.get(c.get("trend_1d"), "flat")
+    v["bias"] = _BIAS_UI.get(c.get("bias"), "NEUTRAL")
+    v["risk_band"] = _BAND_UI.get(c.get("risk_band"), "medium")
+    v["funding"] = (c.get("funding") or 0) / 100.0   # UI nhân lại ×100; nội bộ đã ×100
+    v["funding_vel"] = c.get("funding_vel_num", 0.0)  # UI cần SỐ
+    return v
+
+
+def _trade_view(r: dict) -> dict:
+    """Dịch 1 dòng bảng trades sang shape UI mong đợi."""
+    t4, t1d = r.get("ctx_trend4h") or "?", r.get("ctx_trend1d") or "?"
+    fp, rs = r.get("ctx_funding_pctl"), r.get("ctx_rsi")
+    ctx = (f"Funding {('?' if fp is None else round(fp))}p · "
+           f"RSI {('?' if rs is None else round(rs))} · Trend {t4}/{t1d}")
+    return {"id": r.get("id"), "symbol": r.get("symbol"), "side": (r.get("side") or "").lower(),
+            "status": r.get("status"), "entry": r.get("ctx_price"), "exit": r.get("exit_price"),
+            "pnl": r.get("pnl_pct"), "reason": r.get("reason"), "context": ctx}
+
+
 # ─────────────────────────── FastAPI ───────────────────────────
 app = FastAPI(title="Trader Decision Assistant")
 
@@ -431,7 +475,11 @@ def api_dashboard(refresh_now: bool = False) -> JSONResponse:
     if refresh_now:
         refresh()
     with _LOCK:
-        return JSONResponse(SNAPSHOT)
+        asof = _iso((SNAPSHOT.get("asof") or "").replace(" UTC", ""))
+        out = {"asof": asof, "status": SNAPSHOT.get("status"),
+               "source": SNAPSHOT.get("source"),
+               "coins": [_coin_view(c) for c in SNAPSHOT.get("coins", [])]}
+    return JSONResponse(out)
 
 
 @app.post("/api/journal/open")
@@ -443,7 +491,7 @@ async def journal_open(req: Request) -> JSONResponse:
            "ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,"
            "ctx_vol_ratio,ctx_to_high,ctx_to_low,ctx_corr_btc,status) "
            f"VALUES({','.join([PH] * 14)},'open')")
-    params = (now, b["symbol"], b.get("side", "long"), b.get("reason", ""),
+    params = (now, b["symbol"], b.get("side", "long").lower(), b.get("reason", ""),
               ctx.get("price"), ctx.get("funding_pctl"), ctx.get("trend_4h"),
               ctx.get("trend_1d"), ctx.get("rsi"), ctx.get("dist_atr"),
               ctx.get("vol_ratio"), ctx.get("to_high"), ctx.get("to_low"), ctx.get("corr_btc"))
@@ -470,7 +518,7 @@ async def journal_close(req: Request) -> JSONResponse:
 async def journal_manual(req: Request) -> JSONResponse:
     """Ghi 1 lệnh ĐÃ ĐÓNG nhập tay (entry/exit thật) — cho lệnh quá khứ/ngoài app."""
     b = await req.json()
-    side = b.get("side", "short")
+    side = b.get("side", "short").lower()
     entry, exitp = float(b["entry"]), float(b["exit"])
     pnl = (exitp / entry - 1) if side == "long" else (entry / exitp - 1)
     ctx = _ctx_for(b.get("symbol", "")) or {}
@@ -491,33 +539,44 @@ async def journal_manual(req: Request) -> JSONResponse:
 
 @app.get("/api/journal")
 def journal_list() -> JSONResponse:
-    return JSONResponse(run_query("SELECT * FROM trades ORDER BY id DESC"))
+    rows = run_query("SELECT * FROM trades ORDER BY id DESC")
+    return JSONResponse({"trades": [_trade_view(r) for r in rows]})
 
 
 @app.get("/api/journal/stats")
 def journal_stats() -> JSONResponse:
-    rows = run_query("SELECT * FROM trades WHERE status='closed'")
-    n = len(rows)
+    allrows = run_query("SELECT * FROM trades")
+    closed = [r for r in allrows if r.get("status") == "closed" and r.get("pnl_pct") is not None]
+    total, n = len(allrows), len(closed)
+    openc = sum(1 for r in allrows if r.get("status") == "open")
+    EMPTY = "—"
     if n == 0:
-        return JSONResponse({"n": 0})
+        return JSONResponse({
+            "total": total, "win_rate": 0, "avg_pnl": 0, "open": openc, "closed": 0,
+            "best_funding_bucket": EMPTY, "worst_funding_bucket": EMPTY,
+            "best_trend_regime": EMPTY, "worst_trend_regime": EMPTY,
+            "best_rsi_bucket": EMPTY, "worst_rsi_bucket": EMPTY,
+            "best_volume_bucket": EMPTY, "worst_volume_bucket": EMPTY})
 
-    def agg(keyfn):
+    def best_worst(keyfn):
         groups = {}
-        for r in rows:
-            k = keyfn(r)
-            groups.setdefault(k, []).append(r["pnl_pct"])
-        return {k: {"n": len(v), "win": round(sum(1 for x in v if x > 0) / len(v) * 100, 0),
-                    "avg": round(sum(v) / len(v), 2)} for k, v in sorted(groups.items())}
+        for r in closed:
+            groups.setdefault(keyfn(r), []).append(r["pnl_pct"])
+        avgs = {k: sum(v) / len(v) for k, v in groups.items()}
+        return (max(avgs, key=avgs.get), min(avgs, key=avgs.get))
 
-    wins = sum(1 for r in rows if r["pnl_pct"] > 0)
+    bf = best_worst(lambda r: _fpctl_bucket(r.get("ctx_funding_pctl")))
+    bt = best_worst(lambda r: r.get("ctx_trend4h") or "?")
+    br = best_worst(lambda r: _rsi_bucket(r.get("ctx_rsi")))
+    bv = best_worst(lambda r: _vol_bucket(r.get("ctx_vol_ratio")))
+    wins = sum(1 for r in closed if r["pnl_pct"] > 0)
     return JSONResponse({
-        "n": n, "win": round(wins / n * 100, 1),
-        "avg_pnl": round(sum(r["pnl_pct"] for r in rows) / n, 2),
-        "by_funding": agg(lambda r: _fpctl_bucket(r["ctx_funding_pctl"])),
-        "by_trend4h": agg(lambda r: r["ctx_trend4h"] or "?"),
-        "by_rsi": agg(lambda r: _rsi_bucket(r["ctx_rsi"])),
-        "by_vol": agg(lambda r: _vol_bucket(r.get("ctx_vol_ratio"))),
-    })
+        "total": total, "win_rate": round(wins / n * 100, 1),
+        "avg_pnl": round(sum(r["pnl_pct"] for r in closed) / n, 2), "open": openc, "closed": n,
+        "best_funding_bucket": bf[0], "worst_funding_bucket": bf[1],
+        "best_trend_regime": bt[0], "worst_trend_regime": bt[1],
+        "best_rsi_bucket": br[0], "worst_rsi_bucket": br[1],
+        "best_volume_bucket": bv[0], "worst_volume_bucket": bv[1]})
 
 
 @app.get("/api/snapshots")
@@ -525,7 +584,24 @@ def snapshots_list(days: int = 30) -> JSONResponse:
     since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
     rows = run_query(f"SELECT * FROM daily_snapshots WHERE snap_date>={PH} "
                      "ORDER BY snap_date DESC, symbol", (since,))
-    return JSONResponse(rows)
+    by_day: dict = {}
+    for r in rows:
+        by_day.setdefault(r["snap_date"], []).append(r)
+    snaps = []
+    for day, rs in by_day.items():
+        longs = sum(1 for r in rs if r.get("bias") == "long")
+        shorts = sum(1 for r in rs if r.get("bias") == "short")
+        neutral = len(rs) - longs - shorts
+        regime = ("bull" if longs > shorts and longs >= 2
+                  else "bear" if shorts > longs and shorts >= 2 else "mixed")
+        coins = [{"s": (r.get("symbol") or "").split("/")[0],
+                  "b": _BIAS_UI.get(r.get("bias"), "NEUTRAL"),
+                  "r": int(r.get("risk_score") or 0)}
+                 for r in rs]
+        snaps.append({"asof": _iso(rs[0].get("ts") or (day + " 00:00")),
+                      "regime": regime, "coins": coins,
+                      "summary": f"<b>{longs} long · {shorts} short · {neutral} trung lập.</b>"})
+    return JSONResponse({"snapshots": snaps})
 
 
 @app.post("/api/ask")
@@ -534,9 +610,16 @@ async def api_ask(req: Request) -> JSONResponse:
     return JSONResponse({"answer": ask_gemini(b.get("question", ""))})
 
 
+_INDEX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    return PAGE
+    try:
+        with open(_INDEX_PATH, encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return PAGE   # fallback: bản HUD cũ nếu thiếu file thiết kế
 
 
 PAGE = """<!doctype html><html lang="vi"><head><meta charset="utf-8">
