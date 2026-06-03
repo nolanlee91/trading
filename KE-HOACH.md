@@ -1,14 +1,33 @@
-# Kế hoạch chi tiết — Trading Brain
+# Kế hoạch — Trading Brain
 
-> **CẬP NHẬT 2026-06 — kế hoạch này ĐÃ thực hiện xong và dẫn tới pivot.**
-> Toàn bộ Phase A→D đã chạy thật. Kết quả: mọi chiến lược cơ học đơn lẻ KHÔNG có
-> edge bền thắng buy-and-hold (trend hòa/beta, short & regime tệ hơn, phân kỳ 15m
-> cháy, funding-squeeze yếu). → Dự án **pivot sang Trader Decision Assistant (HUD)**.
-> Trạng thái hiện tại + sản phẩm: xem `README.md`, `PRD.md`, `TASKS.md`.
-> Đánh giá độ đáng tin từng tín hiệu: xem `notebooklm/04-do-dang-tin.md`.
-> Phần dưới là kế hoạch GỐC (giữ lại làm bối cảnh phương pháp luận).
+> Cập nhật 2026-06. Gồm 2 phần: **(1) KẾ HOẠCH HIỆN HÀNH** (sau khi pivot sang HUD),
+> và **(2) Phụ lục — kế hoạch nghiên cứu GỐC** (giữ làm lịch sử & phương pháp luận).
+
+## 1. KẾ HOẠCH HIỆN HÀNH — sản phẩm HUD
+
+**Đã làm:**
+- Nghiên cứu Phase A→D: mọi chiến lược cơ học đơn lẻ KHÔNG thắng buy-and-hold
+  (trend hòa/beta, short & regime tệ hơn, phân kỳ 15m cháy, funding-squeeze yếu) → pivot.
+- HUD 4 layer **bias-aware** (bias theo trend 4H); tự dò sàn (Bybit/Binance/OKX);
+  trợ lý Gemini; giao diện mobile.
+- **Deploy online** Railway + **PostgreSQL** (dùng chung mọi thiết bị); ghi lệnh tay.
+
+**Đang/đợi làm** (chi tiết: `TASKS.md`):
+- Thêm **HYPE + funding Hyperliquid thật** (sàn user trade thật).
+- Lưu snapshot context hằng ngày; thêm ngữ cảnh (volume, đỉnh/đáy gần nhất, tương quan BTC).
+- OI/liquidation khi có nguồn (trả phí hoặc tự thu thập).
+- Tích lũy journal đủ 200-300 lệnh → phân tích **edge cá nhân**.
+
+**Nguyên tắc giữ nguyên:** HUD hỗ trợ quyết định (không bot, không bịa %); tín hiệu
+edge yếu → là *ngữ cảnh*; giá trị thật ở journal. Sản phẩm: `README.md`/`PRD.md`/`TASKS.md`.
+Giải thích chi tiết chỉ số: `notebooklm/ver2/02-chi-so-va-y-nghia.md`. Độ đáng tin:
+`notebooklm/ver2/04-do-dang-tin.md`.
 
 ---
+
+## 2. Phụ lục — Kế hoạch nghiên cứu GỐC (lịch sử)
+
+> Giữ lại để hiểu phương pháp luận & vì sao pivot. Đã thực hiện xong toàn bộ Phase A→D.
 
 > File này để anh đọc và hiểu **em định làm gì, theo thứ tự nào, và vì sao**.
 > Chưa code thêm gì cho tới khi anh duyệt hướng đi.

@@ -1,79 +1,50 @@
 # Trading Brain → Trader Decision Assistant
 
-> **Trạng thái hiện tại (2026-06):** dự án đã đi qua giai đoạn "edge lab" (tìm chiến
-> lược tự động) và **pivot thành một Trader Decision Assistant (HUD)** — web app hỗ
-> trợ quyết định swing discretionary + nhật ký tìm edge cá nhân. KHÔNG phải bot.
->
-> Tài liệu giải thích đầy đủ cho người đọc/NotebookLM nằm trong `notebooklm/`.
+> **Trạng thái (2026-06):** đã pivot từ "edge lab" thành **Trader Decision Assistant
+> (HUD)** và **deploy online** (Railway + PostgreSQL), dùng chung mọi thiết bị. KHÔNG
+> phải bot. Tài liệu giải thích cho người đọc/NotebookLM: `notebooklm/ver2/`.
 
-## Sản phẩm chính: web app HUD (`app.py`)
+## Sản phẩm: web app HUD (`app.py`)
 
 ```bash
 cd trading-brain
-python -m venv .venv
-.venv\Scripts\activate                 # Windows PowerShell
+python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app:app --reload               # mở http://localhost:8000
+uvicorn app:app --reload          # http://localhost:8000
 ```
+Online: deploy Railway (xem `DEPLOY.md`) → mở URL trên điện thoại/laptop.
 
-4 layer:
-1. **Context** — trend 4H/1D, funding percentile, RSI, distance EMA, ATR.
-2. **Risk Score** — điểm rủi ro vào-long-ngay (0-2 bình thường / 3-5 cẩn thận / 6+ rủi ro cao).
-3. **Checklist** — điều kiện thuận lợi cho long, ✓/✗ + tally X/5.
-4. **Journal** — ghi lệnh thật + context lúc vào + PnL → sau 200-300 lệnh phân tích edge cá nhân.
+### 4 layer (chi tiết: `notebooklm/ver2/02-chi-so-va-y-nghia.md`)
+1. **Context** — trend 4H/1D, funding percentile, RSI, distance EMA (ATR), ATR%.
+2. **Risk Score** — điểm rủi ro vào lệnh THEO BIAS (0-9): 0-2 bình thường, 3-5 cẩn thận, 6+ rủi ro cao.
+3. **Checklist** — 5 điều kiện thuận lợi theo bias (long/short), ✓/✗ + tally X/5.
+4. **Journal** — ghi lệnh + context + PnL → tìm edge cá nhân. Lưu PostgreSQL (dùng chung thiết bị); có cả "ghi lệnh đã đóng" nhập tay.
 
-Tự kéo data thật mỗi 5 phút. Deploy Railway: xem `DEPLOY.md`.
+### Tính năng khác
+- **Bias** theo trend 4H: bullish→long, bearish→short, mixed→đứng ngoài.
+- **Tự dò sàn** Bybit→Binance→OKX (tránh 451 Binance ở mạng công ty/cloud).
+- **Trợ lý Gemini**: hỏi-đáp bám dữ liệu thật (cần `GEMINI_API_KEY`).
+- Tự refresh data mỗi 5 phút; giao diện tối ưu mobile.
 
 ## Vì sao là HUD chứ không phải bot
-
-Cả giai đoạn nghiên cứu cho thấy **mọi chiến lược cơ học đơn lẻ đều không có edge bền
-thắng buy-and-hold**: trend-following (hòa, chủ yếu beta), short/regime (tệ hơn),
-phân kỳ 15m (cháy vì phí), funding-squeeze (yếu, không nhất quán). Verdict chi tiết
-trong `notebooklm/04-do-dang-tin.md`. → Giá trị thật chuyển sang **hỗ trợ quyết định +
-tìm edge cá nhân (journal)**.
+Nghiên cứu cho thấy **mọi chiến lược cơ học đơn lẻ đều không thắng buy-and-hold**:
+trend-following (hòa, beta), short/regime (tệ hơn), phân kỳ 15m (cháy vì phí),
+funding-squeeze (yếu). Verdict chi tiết: `notebooklm/ver2/04-do-dang-tin.md`. → Giá
+trị thật chuyển sang hỗ trợ quyết định + journal tìm edge cá nhân.
 
 ## Bản đồ file
 
-**Web app (sản phẩm):**
+**Web app:**
 ```
-app.py          FastAPI: 4 layer HUD + scheduler refresh 5' + journal SQLite + trang HTML
-Procfile        lệnh chạy cho Railway
-.python-version pin Python 3.12
-DEPLOY.md       hướng dẫn deploy Railway (+ giữ journal bằng Volume)
+app.py          FastAPI: 4 layer HUD (bias-aware) + refresh 5' + journal (Postgres/SQLite)
+                + ghi tay + trợ lý Gemini + trang HTML mobile + tự dò sàn
+Procfile · .python-version · DEPLOY.md   (deploy Railway + Postgres + biến môi trường)
 ```
+**Dữ liệu:** `data.py` (OHLCV) · `data_funding.py` (funding) · `indicators.py` (EMA/RSI/ATR).
+**Nghiên cứu:** `strategy.py` `backtest.py` `report.py` `diagnostics.py` `compare.py`
+`divergence.py` `run_funding.py` `study_funding.py` `study_decay.py` `main.py` `config.yaml`.
+**Tài liệu:** `notebooklm/ver2/` (nạp NotebookLM) · `KE-HOACH.md` `PRD.md` `ARCHITECTURE.md` `TASKS.md`.
 
-**Dữ liệu:**
-```
-data.py         CCXT → OHLCV → Parquet cache
-data_funding.py CCXT fetch_funding_rate_history → Parquet
-indicators.py   EMA / RSI(Wilder) / ATR tự viết
-```
-
-**Nghiên cứu (kiểm chứng ý tưởng trước khi tin):**
-```
-strategy.py     trend+pullback (long/short, núm volume/EMA50/regime)
-backtest.py     next-open execution, fixed_r | atr_trailing, trừ fee+slippage+funding
-report.py       winrate/expectancy/PF/DD/net vs buy-and-hold
-diagnostics.py  PnL theo năm + phân bố R + equity PNG
-compare.py      so 4 biến thể strategy
-run_funding.py  chiến lược funding-extreme (expanding percentile, funding thật)
-study_funding.py signal study: funding cực đoan vs forward return
-study_decay.py  tách 2023-24 vs 2025-26, so alpha vs drift
-main.py         orchestrate backtest theo config.yaml
-config.yaml     mọi tham số & giả định chi phí
-```
-
-**Tài liệu:**
-```
-notebooklm/     5 file md tự-chứa cho NotebookLM (tổng quan, data, hỗ trợ, dùng, độ tin)
-KE-HOACH.md     kế hoạch + kết quả nghiên cứu
-PRD.md          yêu cầu sản phẩm
-ARCHITECTURE.md kiến trúc hệ thống
-TASKS.md        checklist + trạng thái
-```
-
-## Nguyên tắc xuyên suốt (chống tự lừa)
-
-Next-open execution · không look-ahead · trừ đủ phí · expanding percentile · luôn so
-buy-and-hold + tách alpha/drift · walk-forward/per-year để soi decay · không vặn tham
-số rồi tin.
+## Nguyên tắc xuyên suốt
+Next-open execution · không look-ahead · trừ đủ phí · expanding percentile · so
+buy-and-hold + tách alpha/drift · walk-forward/per-year soi decay · không vặn tham số rồi tin.
