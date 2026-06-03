@@ -21,6 +21,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -285,13 +286,31 @@ discretionary, KHÔNG phải cố vấn đầu tư. Quy tắc bắt buộc:
   trạng thái lãi/lỗ và mức giá quan trọng (EMA20 = kháng cự/hỗ trợ) từ dữ liệu."""
 
 
+def _gemini_context() -> str:
+    """Bối cảnh GỌN cho Gemini (chỉ field cốt lõi) — giảm token để đỡ chạm quota/TPM."""
+    with _LOCK:
+        coins = SNAPSHOT.get("coins", [])
+        asof = SNAPSHOT.get("asof")
+        source = SNAPSHOT.get("source")
+    slim = []
+    for c in coins:
+        if c.get("error"):
+            slim.append({"symbol": c.get("symbol"), "error": c["error"]})
+            continue
+        slim.append({k: c.get(k) for k in (
+            "symbol", "price", "bias", "risk_score", "risk_band", "trend_4h", "trend_1d",
+            "rsi", "funding_pctl", "funding_ann", "funding_vel", "dist_atr", "atr_pct",
+            "vol_ratio", "to_high", "to_low", "corr_btc", "checklist_ok", "checklist_n",
+            "flags")})
+    return json.dumps({"asof": asof, "source": source, "coins": slim}, ensure_ascii=False)
+
+
 def ask_gemini(question: str) -> str:
     if not GEMINI_API_KEY:
         return ("Chưa cấu hình GEMINI_API_KEY. Lấy key free tại Google AI Studio, rồi đặt "
                 "biến môi trường GEMINI_API_KEY (local: $env:GEMINI_API_KEY='...'; Railway: "
                 "thêm ở mục Variables) và khởi động lại.")
-    with _LOCK:
-        ctx = json.dumps(SNAPSHOT, ensure_ascii=False)
+    ctx = _gemini_context()
     body = {
         "systemInstruction": {"parts": [{"text": GEMINI_SYS}]},
         "contents": [{"parts": [{"text":
@@ -299,17 +318,32 @@ def ask_gemini(question: str) -> str:
         "generationConfig": {"temperature": 0.4},
     }
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    req = urllib.request.Request(
-        url, data=json.dumps(body).encode("utf-8"), method="POST",
-        headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY})
-    try:
-        with urllib.request.urlopen(req, timeout=40) as r:
-            data = json.loads(r.read())
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except urllib.error.HTTPError as e:
-        return f"Lỗi Gemini API ({e.code}): {e.read().decode('utf-8', 'ignore')[:300]}"
-    except Exception as e:
-        return f"Lỗi gọi Gemini: {e}"
+    data_bytes = json.dumps(body).encode("utf-8")
+
+    # Thử tối đa 2 lần: lỗi tạm thời (429 quota/phút, 503 quá tải) chờ rồi thử lại 1 lần.
+    for attempt in range(2):
+        req = urllib.request.Request(
+            url, data=data_bytes, method="POST",
+            headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY})
+        try:
+            with urllib.request.urlopen(req, timeout=40) as r:
+                data = json.loads(r.read())
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 503) and attempt == 0:
+                time.sleep(6)
+                continue
+            if e.code == 429:
+                return ("⚠️ Gemini hết quota (429). Đây là giới hạn free-tier của Google, "
+                        "không phải lỗi app. Cách xử lý: (1) đợi ~1 phút rồi hỏi lại (nếu là "
+                        "giới hạn theo PHÚT); (2) nếu hết hạn mức NGÀY, đợi reset (nửa đêm giờ "
+                        "US Pacific) hoặc bật billing; (3) đổi sang model quota cao hơn bằng "
+                        "biến môi trường GEMINI_MODEL (vd 'gemini-2.0-flash-lite'). "
+                        "Các chỉ số/checklist trên dashboard vẫn hoạt động bình thường.")
+            return f"Lỗi Gemini API ({e.code}): {e.read().decode('utf-8', 'ignore')[:200]}"
+        except Exception as e:
+            return f"Lỗi gọi Gemini: {e}"
+    return "⚠️ Gemini tạm thời không phản hồi (quota/quá tải). Thử lại sau ít phút."
 
 
 # ─────────────────── Layer 4: Journal (PostgreSQL hoặc SQLite) ───────────────────
