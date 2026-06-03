@@ -37,7 +37,12 @@ railway domain          # tạo URL public để mở trên điện thoại
 - Local (PowerShell): `$env:GEMINI_API_KEY='AIza...'` rồi chạy uvicorn trong cùng cửa sổ.
   Giữ lâu dài: `setx GEMINI_API_KEY "AIza..."` (mở terminal mới mới có hiệu lực).
 - Railway: Variables → thêm `GEMINI_API_KEY`. Đổi model (tùy chọn): `GEMINI_MODEL`
-  (mặc định `gemini-2.0-flash`, free tier rộng).
+  (mặc định `gemini-2.5-flash`).
+- **Lỗi 429 "quota / check billing":** key đang ở **free-tier**. Model (2.0/2.5) KHÔNG
+  quyết định free hay trả phí — **billing trên project của key mới quyết định**. Khắc phục:
+  dùng đúng key thuộc project ĐÃ bật billing (cùng key với các app trả phí khác), hoặc
+  bật billing cho project của key hiện tại tại Google AI Studio / Cloud Console. Nếu chỉ
+  dính giới hạn theo phút thì đợi ~1 phút.
 - KHÔNG commit key vào git. Prompt đã ràng buộc: Gemini chỉ dùng dữ liệu thật, không
   bịa dự báo, luôn nhắc quản trị rủi ro.
 

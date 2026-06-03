@@ -59,7 +59,7 @@ LOOKBACK_DAYS = 450
 FUNDING_PCT_DAYS = 365
 DB_PATH = os.environ.get("DB_PATH", "journal.db")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")          # đặt biến môi trường, KHÔNG hardcode
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")  # đổi qua env GEMINI_MODEL
 
 # Ưu tiên Hyperliquid (sàn user trade) → fallback proxy nếu HL không vào được
 # (Binance hay bị 451 ở mạng công ty/cloud). Ép 1 sàn bằng env DATA_EXCHANGE.
@@ -337,8 +337,9 @@ def ask_gemini(question: str) -> str:
                 return ("⚠️ Gemini hết quota (429). Đây là giới hạn free-tier của Google, "
                         "không phải lỗi app. Cách xử lý: (1) đợi ~1 phút rồi hỏi lại (nếu là "
                         "giới hạn theo PHÚT); (2) nếu hết hạn mức NGÀY, đợi reset (nửa đêm giờ "
-                        "US Pacific) hoặc bật billing; (3) đổi sang model quota cao hơn bằng "
-                        "biến môi trường GEMINI_MODEL (vd 'gemini-2.0-flash-lite'). "
+                        "US Pacific) hoặc BẬT BILLING cho project của API key này (429 kèm "
+                        "'billing' nghĩa là key đang ở free-tier); (3) đổi model bằng biến "
+                        "môi trường GEMINI_MODEL (vd 'gemini-2.5-flash', 'gemini-2.0-flash-lite'). "
                         "Các chỉ số/checklist trên dashboard vẫn hoạt động bình thường.")
             return f"Lỗi Gemini API ({e.code}): {e.read().decode('utf-8', 'ignore')[:200]}"
         except Exception as e:
