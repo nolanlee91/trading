@@ -29,8 +29,9 @@
 
 ## Tiếp theo (chưa làm)
 - [ ] **N-1** Migrate lệnh quá khứ từ SQLite local → Postgres online (hoặc ghi tay trên app).
-- [ ] **N-2** Thêm HYPE/Hyperliquid: verify CCXT lấy OHLCV + funding hourly (sàn user trade thật).
-- [ ] **N-3** Funding Hyperliquid thật (thay proxy Binance/Bybit) cho coin user đánh.
+- [x] **N-2/N-3** Hyperliquid là nguồn chính (OHLCV+funding hourly thật) + thêm HYPE.
+  EXCHANGE_PROFILES (chu kỳ funding theo sàn); fix annualize ×(24/h)×365; fallback
+  proxy nếu HL không vào. Verify 4 coin OK (BTC 5%/yr, ETH/HYPE 11%, SOL −21%).
 - [ ] **N-4** Lưu snapshot context hằng ngày để đối chiếu về sau.
 - [ ] **N-5** Thêm ngữ cảnh: volume bất thường, khoảng cách đỉnh/đáy gần nhất, tương quan BTC.
 - [ ] **N-6** Khi có nguồn: OI / liquidation (trả phí hoặc tự thu thập forward).
