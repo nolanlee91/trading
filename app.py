@@ -48,6 +48,14 @@ DATA_EXCHANGES = ([os.environ["DATA_EXCHANGE"]] if os.environ.get("DATA_EXCHANGE
                   else ["bybit", "binance", "okx"])
 _RESOLVED_EX = None
 
+# Journal: dùng PostgreSQL nếu có DATABASE_URL (Railway -> dùng chung mọi thiết bị,
+# 1 database). Fallback SQLite khi chạy local (không có DATABASE_URL).
+USE_PG = bool(os.environ.get("DATABASE_URL"))
+if USE_PG:
+    import psycopg2
+    import psycopg2.extras
+PH = "%s" if USE_PG else "?"   # placeholder tham số khác nhau giữa 2 backend
+
 SNAPSHOT: dict = {"asof": None, "status": "đang tải lần đầu...", "coins": []}
 _LOCK = threading.Lock()
 
@@ -227,21 +235,45 @@ def ask_gemini(question: str) -> str:
         return f"Lỗi gọi Gemini: {e}"
 
 
-# ─────────────────────────── Layer 4: Journal (SQLite) ───────────────────────────
-def db() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+# ─────────────────── Layer 4: Journal (PostgreSQL hoặc SQLite) ───────────────────
+def _conn():
+    if USE_PG:
+        return psycopg2.connect(os.environ["DATABASE_URL"])
+    c = sqlite3.connect(DB_PATH)
+    c.row_factory = sqlite3.Row
+    return c
+
+
+def run_write(sql: str, params=(), returning: bool = False):
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        rid = cur.fetchone()[0] if returning else (None if USE_PG else cur.lastrowid)
+        conn.commit()
+        return rid
+    finally:
+        conn.close()
+
+
+def run_query(sql: str, params=()) -> list:
+    conn = _conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if USE_PG else conn.cursor()
+        cur.execute(sql, params)
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
-    with db() as conn:
-        conn.execute("""CREATE TABLE IF NOT EXISTS trades(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts_open TEXT, symbol TEXT, side TEXT, reason TEXT,
-            ctx_price REAL, ctx_funding_pctl REAL, ctx_trend4h TEXT,
-            ctx_trend1d TEXT, ctx_rsi REAL, ctx_dist_atr REAL,
-            ts_close TEXT, exit_price REAL, pnl_pct REAL, status TEXT)""")
+    id_type = "SERIAL PRIMARY KEY" if USE_PG else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    num = "DOUBLE PRECISION" if USE_PG else "REAL"
+    run_write(f"""CREATE TABLE IF NOT EXISTS trades(
+        id {id_type}, ts_open TEXT, symbol TEXT, side TEXT, reason TEXT,
+        ctx_price {num}, ctx_funding_pctl {num}, ctx_trend4h TEXT,
+        ctx_trend1d TEXT, ctx_rsi {num}, ctx_dist_atr {num},
+        ts_close TEXT, exit_price {num}, pnl_pct {num}, status TEXT)""")
 
 
 def _rsi_bucket(v):
@@ -280,44 +312,39 @@ async def journal_open(req: Request) -> JSONResponse:
     b = await req.json()
     ctx = _ctx_for(b["symbol"])
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M")
-    with db() as conn:
-        cur = conn.execute(
-            """INSERT INTO trades(ts_open,symbol,side,reason,ctx_price,ctx_funding_pctl,
-               ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,status)
-               VALUES(?,?,?,?,?,?,?,?,?,?,'open')""",
-            (now, b["symbol"], b.get("side", "long"), b.get("reason", ""),
-             ctx.get("price"), ctx.get("funding_pctl"), ctx.get("trend_4h"),
-             ctx.get("trend_1d"), ctx.get("rsi"), ctx.get("dist_atr")))
-        return JSONResponse({"id": cur.lastrowid})
+    sql = ("INSERT INTO trades(ts_open,symbol,side,reason,ctx_price,ctx_funding_pctl,"
+           "ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,status) "
+           f"VALUES({','.join([PH] * 10)},'open')")
+    params = (now, b["symbol"], b.get("side", "long"), b.get("reason", ""),
+              ctx.get("price"), ctx.get("funding_pctl"), ctx.get("trend_4h"),
+              ctx.get("trend_1d"), ctx.get("rsi"), ctx.get("dist_atr"))
+    rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
+    return JSONResponse({"id": rid})
 
 
 @app.post("/api/journal/close")
 async def journal_close(req: Request) -> JSONResponse:
     b = await req.json()
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M")
-    with db() as conn:
-        row = conn.execute("SELECT * FROM trades WHERE id=?", (b["id"],)).fetchone()
-        if not row:
-            return JSONResponse({"error": "not found"}, status_code=404)
-        entry, exitp = row["ctx_price"], float(b["exit_price"])
-        pnl = (exitp / entry - 1) if row["side"] == "long" else (entry / exitp - 1)
-        conn.execute("UPDATE trades SET ts_close=?,exit_price=?,pnl_pct=?,status='closed' WHERE id=?",
-                     (now, exitp, round(pnl * 100, 2), b["id"]))
+    rows = run_query(f"SELECT * FROM trades WHERE id={PH}", (b["id"],))
+    if not rows:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    row = rows[0]
+    entry, exitp = row["ctx_price"], float(b["exit_price"])
+    pnl = (exitp / entry - 1) if row["side"] == "long" else (entry / exitp - 1)
+    run_write(f"UPDATE trades SET ts_close={PH},exit_price={PH},pnl_pct={PH},status='closed' WHERE id={PH}",
+              (now, exitp, round(pnl * 100, 2), b["id"]))
     return JSONResponse({"ok": True, "pnl_pct": round(pnl * 100, 2)})
 
 
 @app.get("/api/journal")
 def journal_list() -> JSONResponse:
-    with db() as conn:
-        rows = [dict(r) for r in conn.execute("SELECT * FROM trades ORDER BY id DESC").fetchall()]
-    return JSONResponse(rows)
+    return JSONResponse(run_query("SELECT * FROM trades ORDER BY id DESC"))
 
 
 @app.get("/api/journal/stats")
 def journal_stats() -> JSONResponse:
-    with db() as conn:
-        rows = [dict(r) for r in conn.execute(
-            "SELECT * FROM trades WHERE status='closed'").fetchall()]
+    rows = run_query("SELECT * FROM trades WHERE status='closed'")
     n = len(rows)
     if n == 0:
         return JSONResponse({"n": 0})

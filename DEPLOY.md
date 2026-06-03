@@ -49,6 +49,20 @@ railway domain          # tạo URL public để mở trên điện thoại
   bằng env `DATA_EXCHANGE=bybit`. (Symbol dùng định dạng chung của CCXT nên đổi sàn không
   cần sửa gì khác.)
 - Muốn lưu lịch sử snapshot (để soi lại): thêm PostgreSQL của Railway sau (Phase tiếp).
-- **Journal (L4) dùng SQLite.** Filesystem Railway tạm → mỗi redeploy MẤT journal. Để giữ:
-  Railway → service → Variables thêm `DB_PATH=/data/journal.db`, rồi gắn một **Volume**
-  mount tại `/data`. Journal sẽ bền qua redeploy. (Hoặc đổi sang Postgres ở phase sau.)
+## Journal — chọn 1 trong 2 nơi lưu
+
+App tự nhận: **có `DATABASE_URL` → dùng PostgreSQL; không có → SQLite** (local).
+
+**Cách 1 (KHUYÊN — dùng chung mọi thiết bị, 1 database): PostgreSQL**
+1. Railway → project → **New → Database → Add PostgreSQL**.
+2. Vào **service app** → Variables → thêm reference: `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`
+   (chọn từ gợi ý của Railway, trỏ tới Postgres vừa tạo).
+3. Redeploy. App tự tạo bảng `trades` trong Postgres. Mở URL từ điện thoại/laptop nào
+   cũng chung 1 journal, bền vĩnh viễn, không mất khi redeploy.
+
+**Cách 2 (đơn giản, 1 instance): SQLite + Volume**
+- Variables thêm `DB_PATH=/data/journal.db`; Settings → Volumes → mount `/data`.
+- Đủ cho 1 mình dùng; nhưng Postgres bền & chuẩn hơn cho nhiều thiết bị.
+
+> Lệnh đã ghi ở máy local nằm trong SQLite local, KHÔNG tự sang Postgres. Sau khi
+> deploy Postgres, ghi lại trên app online (1 lệnh) hoặc nhờ chèn tay.
