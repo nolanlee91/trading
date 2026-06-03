@@ -259,6 +259,7 @@ def refresh(force: bool = True) -> None:
         SNAPSHOT["asof"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         SNAPSHOT["status"] = "ok"
         SNAPSHOT["source"] = _RESOLVED_EX or "?"
+    snapshot_daily(coins)   # N-4: chụp bối cảnh 1 lần/ngày (idempotent)
 
 
 def _ctx_for(symbol: str) -> dict:
@@ -339,6 +340,15 @@ def run_query(sql: str, params=()) -> list:
         conn.close()
 
 
+def _existing_cols(table: str) -> set:
+    """Tên cột hiện có của 1 bảng (để ALTER thêm cột còn thiếu, chạy cả 2 backend)."""
+    if USE_PG:
+        rows = run_query("SELECT column_name FROM information_schema.columns "
+                         f"WHERE table_name={PH}", (table,))
+        return {r["column_name"] for r in rows}
+    return {r["name"] for r in run_query(f"PRAGMA table_info({table})")}
+
+
 def init_db() -> None:
     id_type = "SERIAL PRIMARY KEY" if USE_PG else "INTEGER PRIMARY KEY AUTOINCREMENT"
     num = "DOUBLE PRECISION" if USE_PG else "REAL"
@@ -347,6 +357,45 @@ def init_db() -> None:
         ctx_price {num}, ctx_funding_pctl {num}, ctx_trend4h TEXT,
         ctx_trend1d TEXT, ctx_rsi {num}, ctx_dist_atr {num},
         ts_close TEXT, exit_price {num}, pnl_pct {num}, status TEXT)""")
+
+    # N-5 persist: thêm cột ngữ cảnh mới vào bảng trades đã tồn tại (SQLite không
+    # hỗ trợ ADD COLUMN IF NOT EXISTS -> tự kiểm cột rồi mới ALTER). Cột cũ giữ NULL.
+    have = _existing_cols("trades")
+    for col in ("ctx_vol_ratio", "ctx_to_high", "ctx_to_low", "ctx_corr_btc"):
+        if col not in have:
+            run_write(f"ALTER TABLE trades ADD COLUMN {col} {num}")
+
+    # N-4: ảnh chụp bối cảnh thị trường mỗi ngày (kể cả ngày KHÔNG vào lệnh) để
+    # sau này so "ngày đánh vs ngày bỏ qua". 1 dòng / coin / ngày (snap_date UTC).
+    run_write(f"""CREATE TABLE IF NOT EXISTS daily_snapshots(
+        id {id_type}, snap_date TEXT, ts TEXT, symbol TEXT, price {num},
+        trend4h TEXT, trend1d TEXT, rsi {num}, dist_atr {num},
+        funding_pctl {num}, funding_ann {num}, vol_ratio {num},
+        to_high {num}, to_low {num}, corr_btc {num}, bias TEXT, risk_score {num})""")
+
+
+def snapshot_daily(coins: list) -> None:
+    """Ghi snapshot bối cảnh 1 lần/ngày/coin (idempotent: bỏ qua nếu hôm nay đã có)."""
+    today = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M")
+    for c in coins:
+        if c.get("error"):
+            continue
+        try:
+            dup = run_query(f"SELECT 1 FROM daily_snapshots WHERE snap_date={PH} AND symbol={PH}",
+                            (today, c["symbol"]))
+            if dup:
+                continue
+            run_write(
+                "INSERT INTO daily_snapshots(snap_date,ts,symbol,price,trend4h,trend1d,rsi,"
+                "dist_atr,funding_pctl,funding_ann,vol_ratio,to_high,to_low,corr_btc,bias,risk_score) "
+                f"VALUES({','.join([PH] * 16)})",
+                (today, now, c["symbol"], c.get("price"), c.get("trend_4h"), c.get("trend_1d"),
+                 c.get("rsi"), c.get("dist_atr"), c.get("funding_pctl"), c.get("funding_ann"),
+                 c.get("vol_ratio"), c.get("to_high"), c.get("to_low"), c.get("corr_btc"),
+                 c.get("bias"), c.get("risk_score")))
+        except Exception:
+            pass   # snapshot không bao giờ được làm hỏng refresh data
 
 
 def _rsi_bucket(v):
@@ -357,6 +406,11 @@ def _rsi_bucket(v):
 def _fpctl_bucket(v):
     if v is None: return "?"
     return "<25" if v < 25 else "25-50" if v < 50 else "50-75" if v < 75 else "75-90" if v < 90 else ">90"
+
+
+def _vol_bucket(v):
+    if v is None: return "?"
+    return "thấp<0.8" if v < 0.8 else "BT0.8-1.5" if v < 1.5 else "cao1.5-2.5" if v < 2.5 else "spike>2.5"
 
 
 # ─────────────────────────── FastAPI ───────────────────────────
@@ -386,11 +440,13 @@ async def journal_open(req: Request) -> JSONResponse:
     ctx = _ctx_for(b["symbol"])
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M")
     sql = ("INSERT INTO trades(ts_open,symbol,side,reason,ctx_price,ctx_funding_pctl,"
-           "ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,status) "
-           f"VALUES({','.join([PH] * 10)},'open')")
+           "ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,"
+           "ctx_vol_ratio,ctx_to_high,ctx_to_low,ctx_corr_btc,status) "
+           f"VALUES({','.join([PH] * 14)},'open')")
     params = (now, b["symbol"], b.get("side", "long"), b.get("reason", ""),
               ctx.get("price"), ctx.get("funding_pctl"), ctx.get("trend_4h"),
-              ctx.get("trend_1d"), ctx.get("rsi"), ctx.get("dist_atr"))
+              ctx.get("trend_1d"), ctx.get("rsi"), ctx.get("dist_atr"),
+              ctx.get("vol_ratio"), ctx.get("to_high"), ctx.get("to_low"), ctx.get("corr_btc"))
     rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
     return JSONResponse({"id": rid})
 
@@ -420,11 +476,15 @@ async def journal_manual(req: Request) -> JSONResponse:
     ctx = _ctx_for(b.get("symbol", "")) or {}
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M")
     sql = ("INSERT INTO trades(ts_open,symbol,side,reason,ctx_price,ctx_funding_pctl,"
-           "ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,ts_close,exit_price,pnl_pct,status) "
-           f"VALUES({','.join([PH] * 13)},'closed')")
+           "ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,"
+           "ctx_vol_ratio,ctx_to_high,ctx_to_low,ctx_corr_btc,"
+           "ts_close,exit_price,pnl_pct,status) "
+           f"VALUES({','.join([PH] * 17)},'closed')")
     params = (now, b.get("symbol", ""), side, b.get("reason", "") + " [nhập tay]",
               entry, ctx.get("funding_pctl"), ctx.get("trend_4h"), ctx.get("trend_1d"),
-              ctx.get("rsi"), ctx.get("dist_atr"), now, exitp, round(pnl * 100, 2))
+              ctx.get("rsi"), ctx.get("dist_atr"),
+              ctx.get("vol_ratio"), ctx.get("to_high"), ctx.get("to_low"), ctx.get("corr_btc"),
+              now, exitp, round(pnl * 100, 2))
     rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
     return JSONResponse({"id": rid, "pnl_pct": round(pnl * 100, 2)})
 
@@ -456,7 +516,16 @@ def journal_stats() -> JSONResponse:
         "by_funding": agg(lambda r: _fpctl_bucket(r["ctx_funding_pctl"])),
         "by_trend4h": agg(lambda r: r["ctx_trend4h"] or "?"),
         "by_rsi": agg(lambda r: _rsi_bucket(r["ctx_rsi"])),
+        "by_vol": agg(lambda r: _vol_bucket(r.get("ctx_vol_ratio"))),
     })
+
+
+@app.get("/api/snapshots")
+def snapshots_list(days: int = 30) -> JSONResponse:
+    since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y-%m-%d")
+    rows = run_query(f"SELECT * FROM daily_snapshots WHERE snap_date>={PH} "
+                     "ORDER BY snap_date DESC, symbol", (since,))
+    return JSONResponse(rows)
 
 
 @app.post("/api/ask")

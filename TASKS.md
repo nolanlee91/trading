@@ -33,10 +33,13 @@
 - [x] **N-2/N-3** Hyperliquid là nguồn chính (OHLCV+funding hourly thật) + thêm HYPE.
   EXCHANGE_PROFILES (chu kỳ funding theo sàn); fix annualize ×(24/h)×365; fallback
   proxy nếu HL không vào. Verify 4 coin OK (BTC 5%/yr, ETH/HYPE 11%, SOL −21%).
-- [ ] **N-4** Lưu snapshot context hằng ngày để đối chiếu về sau.
-- [x] **N-5** Ngữ cảnh thêm (HIỂN THỊ ở HUD): volume 1D vs TB20, vị trí trong biên
-  30 ngày (cách đỉnh/đáy %), tương quan BTC (corr lợi suất 30 phiên). + flags.
-  *Chưa* ghi các trường này vào journal (cần ALTER bảng 2 backend) — để sau nếu cần.
+- [x] **N-4** Snapshot context hằng ngày → bảng `daily_snapshots` (1 dòng/coin/ngày,
+  idempotent). Ghi cả ngày KHÔNG vào lệnh để sau so "ngày đánh vs ngày bỏ qua".
+  Endpoint `GET /api/snapshots?days=30`.
+- [x] **N-5** Ngữ cảnh thêm: volume 1D vs TB20, vị trí trong biên 30 ngày (cách
+  đỉnh/đáy %), tương quan BTC (corr lợi suất 30 phiên) + flags. ĐÃ persist vào
+  journal (ALTER thêm cột ctx_vol_ratio/to_high/to_low/corr_btc, 2 backend) + bucket
+  thống kê `by_vol`.
 - [ ] **N-6** Khi có nguồn: OI / liquidation (trả phí hoặc tự thu thập forward).
 
 ## Nợ kỹ thuật
