@@ -112,6 +112,17 @@ def data_exchange() -> str:
     return _RESOLVED_EX
 
 
+def _btc_ref_d1():
+    """Chuỗi đóng cửa 1D của BTC để tính tương quan (đọc cache; BTC đã được
+    phân tích đầu danh sách nên parquet sẵn có). force=False để khỏi tải lại."""
+    ex = data_exchange()
+    prof = EXCHANGE_PROFILES[ex]
+    d = fetch_ohlcv(symbol=prof["ohlcv"]("BTC"), exchange=ex, market=prof["market"],
+                    timeframe="1d", since=_since(LOOKBACK_DAYS), until=None,
+                    cache_dir=CACHE, force=False)
+    return d["close"]
+
+
 def analyze_coin(symbol: str, force: bool) -> dict:
     """symbol = nhãn hiển thị (vd 'BTC/USDT'); base lấy phần trước '/'."""
     base = symbol.split("/")[0]
@@ -136,6 +147,26 @@ def analyze_coin(symbol: str, force: bool) -> dict:
     de20 = ema(d1["close"], 20); de50 = ema(d1["close"], 50); de200 = ema(d1["close"], 200)
     t1d = _trend(d1["close"].iloc[-1], de20.iloc[-1], de50.iloc[-1], de200.iloc[-1])
     ret7 = float(d1["close"].iloc[-1] / d1["close"].iloc[-8] - 1)
+
+    # ── N-5: ngữ cảnh bổ sung (volume bất thường, vị trí trong biên 30 ngày, corr BTC) ──
+    vol = d1["volume"]
+    vavg = float(vol.iloc[-21:-1].mean()) if len(vol) >= 21 else float(vol.mean())
+    vol_ratio = round(float(vol.iloc[-1]) / vavg, 2) if vavg else 1.0   # >1 = sôi động hơn TB
+    win = d1.iloc[-30:]
+    hi30 = float(win["high"].max()); lo30 = float(win["low"].min())
+    to_high = round((px / hi30 - 1) * 100, 1)   # % so với ĐỈNH 30N (âm = dưới đỉnh)
+    to_low = round((px / lo30 - 1) * 100, 1)    # % so với ĐÁY 30N (dương = trên đáy)
+    if base == "BTC":
+        corr_btc = 1.0
+    else:
+        try:
+            ra = d1["close"].pct_change().dropna().iloc[-30:].reset_index(drop=True)
+            rb = _btc_ref_d1().pct_change().dropna().iloc[-30:].reset_index(drop=True)
+            n = min(len(ra), len(rb))
+            corr_btc = round(float(ra.iloc[-n:].reset_index(drop=True)
+                                   .corr(rb.iloc[-n:].reset_index(drop=True))), 2) if n >= 10 else None
+        except Exception:
+            corr_btc = None
 
     f_win = fund[fund["time"] >= fund["time"].max() - dt.timedelta(days=FUNDING_PCT_DAYS)]
     f_now = float(fund["funding"].iloc[-1])
@@ -197,12 +228,19 @@ def analyze_coin(symbol: str, force: bool) -> dict:
         flags.append(f"Giá căng +{dist_atr:.1f} ATR trên EMA20 — chờ hồi hơn đuổi")
     elif dist_atr <= -1.5:
         flags.append(f"Giá {dist_atr:.1f} ATR dưới EMA20 — quá bán ngắn hạn")
+    if vol_ratio >= 2:
+        flags.append(f"Volume 1D ×{vol_ratio} trung bình — biến động bất thường")
+    if to_high >= -2:
+        flags.append(f"Sát ĐỈNH 30 ngày (cách {to_high}%) — coi chừng kháng cự")
+    elif to_low <= 2:
+        flags.append(f"Sát ĐÁY 30 ngày (+{to_low}%) — coi chừng hỗ trợ/đảo chiều")
 
     return {"symbol": symbol, "price": px, "trend_4h": t4, "trend_1d": t1d,
             "dist_atr": round(dist_atr, 2), "rsi": round(r_now, 0),
             "ret7": round(ret7 * 100, 1), "funding": round(f_now * 100, 4),
             "funding_ann": round(ann, 0), "funding_pctl": round(f_pctl, 0),
             "funding_vel": vel, "atr_pct": round(atr_v / px * 100, 1),
+            "vol_ratio": vol_ratio, "to_high": to_high, "to_low": to_low, "corr_btc": corr_btc,
             "bias": bias, "risk_score": risk, "risk_band": band, "risk_why": why,
             "checklist": checklist, "checklist_ok": n_ok, "checklist_n": len(checklist),
             "flags": flags}
@@ -524,6 +562,9 @@ function card(c){
    <div><span class="k">Giá vs EMA20:</span> ${c.dist_atr>0?'+':''}${c.dist_atr} ATR</div>
    <div><span class="k">RSI / 7d:</span> ${c.rsi} / ${c.ret7>0?'+':''}${c.ret7}%</div>
    <div><span class="k">Funding:</span> ${c.funding_pctl}pct (${c.funding_vel})</div>
+   <div><span class="k">Volume 1D:</span> ×${c.vol_ratio} TB</div>
+   <div><span class="k">Biên 30N:</span> đỉnh ${c.to_high}% · đáy +${c.to_low}%</div>
+   <div><span class="k">Corr BTC:</span> ${c.corr_btc==null?'—':c.corr_btc}</div>
   </div>
   <div class="small">Checklist ${c.bias==='long'?'mua':c.bias==='short'?'bán':'(chưa có bias)'}: ${c.checklist_ok}/${c.checklist_n} thuận lợi</div>
   ${chk}${flags}</div>`;

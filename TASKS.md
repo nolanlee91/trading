@@ -33,7 +33,9 @@
   EXCHANGE_PROFILES (chu kỳ funding theo sàn); fix annualize ×(24/h)×365; fallback
   proxy nếu HL không vào. Verify 4 coin OK (BTC 5%/yr, ETH/HYPE 11%, SOL −21%).
 - [ ] **N-4** Lưu snapshot context hằng ngày để đối chiếu về sau.
-- [ ] **N-5** Thêm ngữ cảnh: volume bất thường, khoảng cách đỉnh/đáy gần nhất, tương quan BTC.
+- [x] **N-5** Ngữ cảnh thêm (HIỂN THỊ ở HUD): volume 1D vs TB20, vị trí trong biên
+  30 ngày (cách đỉnh/đáy %), tương quan BTC (corr lợi suất 30 phiên). + flags.
+  *Chưa* ghi các trường này vào journal (cần ALTER bảng 2 backend) — để sau nếu cần.
 - [ ] **N-6** Khi có nguồn: OI / liquidation (trả phí hoặc tự thu thập forward).
 
 ## Nợ kỹ thuật
