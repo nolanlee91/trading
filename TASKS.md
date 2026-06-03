@@ -28,7 +28,8 @@
 - [x] **Ghi lệnh đã đóng nhập tay** (entry/exit thật) cho lệnh quá khứ.
 
 ## Tiếp theo (chưa làm)
-- [ ] **N-1** Migrate lệnh quá khứ từ SQLite local → Postgres online (hoặc ghi tay trên app).
+- [x] **N-1** Postgres support (code) XONG — `USE_PG`/`psycopg2`/`init_db` 2 backend.
+  Phần còn lại chỉ là gõ tay lại 1 lệnh ETH local lên app online (không phải việc code).
 - [x] **N-2/N-3** Hyperliquid là nguồn chính (OHLCV+funding hourly thật) + thêm HYPE.
   EXCHANGE_PROFILES (chu kỳ funding theo sàn); fix annualize ×(24/h)×365; fallback
   proxy nếu HL không vào. Verify 4 coin OK (BTC 5%/yr, ETH/HYPE 11%, SOL −21%).
