@@ -371,6 +371,28 @@ input,select,textarea{font-family:inherit;}
 .struct-liq .sl .slv{font-family:var(--mono);font-weight:600;color:var(--text);}
 .struct-liq .sl .slv.up{color:var(--bear);} .struct-liq .sl .slv.dn{color:var(--bull);}
 
+/* ---------- Decision State (Layer 7: tổng hợp) ---------- */
+.decision{margin-bottom:12px;border-radius:var(--radius-sm);border:1px solid var(--border);overflow:hidden;background:var(--card-2);}
+.decision.dir-short{border-color:rgba(248,81,73,.4);}
+.decision.dir-long{border-color:rgba(63,185,80,.4);}
+.decision.g-watch{border-style:dashed;opacity:.92;}
+.dc-top{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 12px;}
+.decision.dir-short .dc-top{background:var(--bear-dim);}
+.decision.dir-long .dc-top{background:var(--bull-dim);}
+.decision.dir-none .dc-top{background:var(--border);}
+.dc-label{font-family:var(--mono);font-size:12.5px;font-weight:700;letter-spacing:.2px;}
+.decision.dir-short .dc-label{color:#ff8a84;} .decision.dir-long .dc-label{color:#6ee787;} .decision.dir-none .dc-label{color:var(--text-2);}
+.dc-score{font-family:var(--mono);font-size:13px;font-weight:700;padding:1px 8px;border-radius:6px;background:rgba(0,0,0,.25);color:var(--text);}
+.dc-inval{padding:6px 12px 0;font-size:11px;color:#ff8a84;font-family:var(--mono);}
+.decision.dir-long .dc-inval{color:#6ee787;}
+.dc-reasons{margin:6px 0 0;padding:6px 12px 10px;list-style:none;display:flex;flex-direction:column;gap:3px;}
+.dc-reasons li{font-size:11px;color:var(--text-2);padding-left:12px;position:relative;line-height:1.35;}
+.dc-reasons li::before{content:"•";position:absolute;left:0;color:var(--muted);}
+.dc-ci{display:flex;align-items:center;gap:9px;padding:8px 12px;background:var(--card);font-size:12px;}
+.dc-ci .mk{flex:none;width:17px;height:17px;border-radius:5px;display:grid;place-items:center;font-size:10px;font-weight:700;}
+.dc-ci.ok .mk{background:var(--bull-dim);color:var(--bull);} .dc-ci.no .mk{background:var(--bear-dim);color:var(--bear);} .dc-ci.unk .mk{background:var(--border);color:var(--muted);}
+.dc-ci.no{color:var(--text-2);} .dc-ci.unk{color:var(--muted);}
+
 /* ---------- Level 2 + 3 (expandable) ---------- */
 .coin-more{
   display:grid;grid-template-rows:0fr;
@@ -451,6 +473,7 @@ input,select,textarea{font-family:inherit;}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 .seg{display:flex;gap:0;background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--radius-sm);padding:3px;}
 .seg button{flex:1;height:38px;border:none;background:transparent;border-radius:6px;font-size:13px;font-weight:600;color:var(--text-2);transition:all .14s;}
+.seg button.on{background:var(--card-2);color:var(--text);}
 .seg button.on[data-side="Long"]{background:var(--bull-dim);color:var(--bull);}
 .seg button.on[data-side="Short"]{background:var(--bear-dim);color:var(--bear);}
 .btn-primary{
@@ -656,6 +679,12 @@ input,select,textarea{font-family:inherit;}
               <button type="button" data-side="Short">Short</button>
             </div>
           </div>
+          <div class="field"><label>Entry type</label>
+            <div class="seg" id="open-entry">
+              <button type="button" data-entry="anticipation" class="on">Anticipation</button>
+              <button type="button" data-entry="confirmation">Confirmation</button>
+            </div>
+          </div>
           <div class="field"><label>Reason / thesis</label><textarea class="textarea" id="open-reason" placeholder="Why are you taking this? What's the context edge?"></textarea></div>
           <button class="btn-primary" id="open-submit">Open Trade</button>
         </div>
@@ -801,7 +830,11 @@ const MOCK = {
           support:{lo:65100,hi:66200,mid:65650,strength:5,dist_pct:-2.6,sources:["30D low","swing 1D","vol spike 1D"],touches:38},
           structure_4h:{state:"bullish",event:"BOS",invalidation:65100}, structure_1d:{state:"bullish",event:"BOS"},
           current_zone:"H4 Premium (supply-side)", premium_discount:"premium",
-          liquidity_above:[68900,69800,71200], liquidity_below:[65650,64200,62000] },
+          liquidity_above:[68900,69800,71200], liquidity_below:[65650,64200,62000],
+          btc_regime:"", decision:{direction:"long",stage:"confirmation",label:"LONG SETUP — Confirmation",grade:"setup",score:5,max:7,
+            invalidation:"H4 đóng nến DƯỚI 65100",
+            reasons:["H4 bullish (BOS)","Giá: discount · H4 Demand","Funding neutral · OI rising · New longs — cầu thật","Spot flow: chưa có data (Module 5)"],
+            checklist:[{label:"Giá tại H4/D1 demand (support/discount)",ok:true},{label:"Cấu trúc H4 bullish hoặc higher-low",ok:true},{label:"Funding không đông long (âm/trung tính)",ok:true},{label:"OI không đỡ bán short thật",ok:true},{label:"BTC không phá xuống hỗ trợ chính",ok:true},{label:"Spot flow không bán tháo / có cầu",ok:null},{label:"Có invalidation rõ phía dưới vùng",ok:true}]} },
 
         { symbol:"ETH", price:3284.18, trend_4h:"up", trend_1d:"flat",
           dist_atr:1.4, rsi:51.2, ret7:0.8,
@@ -821,7 +854,11 @@ const MOCK = {
           support:{lo:3150,hi:3200,mid:3175,strength:3,dist_pct:-3.3,sources:["swing 1D","vol spike 4H"],touches:14},
           structure_4h:{state:"bearish",event:"CHOCH",invalidation:3320}, structure_1d:{state:"bullish",event:null},
           current_zone:"H4 Supply (FVG)", premium_discount:"premium",
-          liquidity_above:[3320,3410,3520], liquidity_below:[3175,3080,2960] },
+          liquidity_above:[3320,3410,3520], liquidity_below:[3175,3080,2960],
+          btc_regime:"bullish/premium", decision:{direction:"short",stage:"anticipation",label:"SHORT SETUP — Anticipation",grade:"setup",score:5,max:7,
+            invalidation:"H4 đóng nến TRÊN 3320",
+            reasons:["H4 bearish (CHOCH)","Giá: at_resistance · H4 Supply (FVG)","Funding positive · OI falling · Short covering — rally yếu","BTC bullish/premium · liquidity below 65650/64200/62000","Spot flow: chưa có data (Module 5)"],
+            checklist:[{label:"Giá tại H4/D1 supply (resistance/premium)",ok:true},{label:"Cấu trúc H4 bearish hoặc lower-high",ok:true},{label:"Funding dương (long đang trả phí)",ok:true},{label:"OI không đỡ rally long thật",ok:true},{label:"BTC không phá lên kháng cự chính",ok:false},{label:"Spot flow yếu / không mua chủ động",ok:null},{label:"Có invalidation rõ phía trên vùng",ok:true}]} },
 
         { symbol:"SOL", price:142.07, trend_4h:"down", trend_1d:"down",
           dist_atr:2.6, rsi:71.8, ret7:-6.4,
@@ -841,7 +878,11 @@ const MOCK = {
           support:{lo:138.2,hi:139.6,mid:138.9,strength:3,dist_pct:-2.2,sources:["swing 4H","vol spike 4H"],touches:7},
           structure_4h:{state:"bearish",event:"BOS",invalidation:149.85}, structure_1d:{state:"bearish",event:"CHOCH"},
           current_zone:"H4 Discount (demand-side)", premium_discount:"discount",
-          liquidity_above:[148.5,152.0,158.4], liquidity_below:[138.9,134.2,128.0] },
+          liquidity_above:[148.5,152.0,158.4], liquidity_below:[138.9,134.2,128.0],
+          btc_regime:"bullish/premium", decision:{direction:"short",stage:"confirmation",label:"SHORT WATCH — Confirmation",grade:"watch",score:4,max:7,
+            invalidation:"H4 đóng nến TRÊN 149.85",
+            reasons:["H4 bearish (BOS)","Giá: discount (chưa tới supply)","Funding positive · OI rising · New shorts","Spot flow: chưa có data (Module 5)"],
+            checklist:[{label:"Giá tại H4/D1 supply (resistance/premium)",ok:false},{label:"Cấu trúc H4 bearish hoặc lower-high",ok:true},{label:"Funding dương (long đang trả phí)",ok:true},{label:"OI không đỡ rally long thật",ok:true},{label:"BTC không phá lên kháng cự chính",ok:false},{label:"Spot flow yếu / không mua chủ động",ok:null},{label:"Có invalidation rõ phía trên vùng",ok:true}]} },
 
         { symbol:"HYPE", price:28.94, trend_4h:"up", trend_1d:"up",
           dist_atr:0.5, rsi:54.0, ret7:7.1,
@@ -861,7 +902,11 @@ const MOCK = {
           support:{lo:27.0,hi:27.6,mid:27.3,strength:4,dist_pct:-5.7,sources:["swing 1D","swing 4H","vol spike 4H"],touches:19},
           structure_4h:{state:"bullish",event:"CHOCH",invalidation:27.3}, structure_1d:{state:"bullish",event:"BOS"},
           current_zone:"H4 Equilibrium", premium_discount:"equilibrium",
-          liquidity_above:[30.4,31.8,33.5], liquidity_below:[27.3,26.0,24.5] }
+          liquidity_above:[30.4,31.8,33.5], liquidity_below:[27.3,26.0,24.5],
+          btc_regime:"bullish/premium", decision:{direction:"none",stage:null,label:"NO SETUP — đứng ngoài",grade:"none",score:2,max:7,
+            invalidation:null,
+            reasons:[],
+            checklist:[{label:"Giá tại H4/D1 demand (support/discount)",ok:false},{label:"Cấu trúc H4 bullish hoặc higher-low",ok:true},{label:"Funding không đông long (âm/trung tính)",ok:false},{label:"OI không đỡ bán short thật",ok:true},{label:"BTC không phá xuống hỗ trợ chính",ok:false},{label:"Spot flow không bán tháo / có cầu",ok:null},{label:"Có invalidation rõ phía dưới vùng",ok:false}]} }
       ]
     };
   },
@@ -1027,6 +1072,21 @@ function renderCoins(coins){
         </div>
       </div>`;
 
+    // Layer 7: Decision State (banner tổng hợp)
+    const dec = c.decision || {};
+    const decCls = dec.direction==="short"?"dir-short":dec.direction==="long"?"dir-long":"dir-none";
+    const decReasons = (dec.reasons||[]).map(r=>`<li>${r}</li>`).join("");
+    const decChk = (dec.checklist||[]).map(x=>{
+      const m=x.ok===true?"ok":x.ok===null?"unk":"no";
+      const s=x.ok===true?"✓":x.ok===null?"?":"✕";
+      return `<div class="dc-ci ${m}"><span class="mk">${s}</span>${x.label}</div>`;}).join("");
+    const decision = dec.label ? `
+      <div class="decision ${decCls} g-${dec.grade||'none'}">
+        <div class="dc-top"><span class="dc-label">${dec.label}</span><span class="dc-score">${dec.score}/${dec.max}</span></div>
+        ${dec.invalidation?`<div class="dc-inval">✕ Invalidation: ${dec.invalidation}</div>`:""}
+        ${decReasons?`<ul class="dc-reasons">${decReasons}</ul>`:""}
+      </div>` : "";
+
     const fullCl = c.checklist.map(x=>`<div class="cl-item ${x.ok?'':'fail'}"><span class="mk ${x.ok?'ok':'no'}">${x.ok?'✓':'✕'}</span><span class="lab">${x.label}</span></div>`).join("");
 
     const raw = [
@@ -1042,6 +1102,7 @@ function renderCoins(coins){
 
     card.innerHTML=`
       <div class="coin-l1">
+        ${decision}
         <div class="coin-top">
           <div class="coin-id">
             <div class="coin-sym"><span class="coin-tick">${c.symbol.split("/")[0]}</span><span class="coin-price">$${fmtPrice(c.price)}</span></div>
@@ -1091,6 +1152,7 @@ function renderCoins(coins){
           <div class="l2-grid">${l2}</div>
         </div>
         <div class="l3">
+          ${dec.checklist&&dec.checklist.length?`<div class="sub-label">Decision Checklist · ${dec.score}/${dec.max}${dec.direction&&dec.direction!=='none'?' '+dec.direction.toUpperCase():''}</div><div class="full-checklist">${decChk}</div>`:""}
           <div class="sub-label">Checklist · ${c.checklist_ok}/${c.checklist_n} conditions</div>
           <div class="full-checklist">${fullCl}</div>
           <div class="sub-label">Raw Metrics</div>
@@ -1226,7 +1288,8 @@ function renderTrades(trades){
 }
 
 async function openTrade(){
-  const body={ symbol:$("#open-symbol").value, side:$("#open-side .on").dataset.side, reason:$("#open-reason").value.trim() };
+  const body={ symbol:$("#open-symbol").value, side:$("#open-side .on").dataset.side,
+    entry_type:$("#open-entry .on").dataset.entry, reason:$("#open-reason").value.trim() };
   if(!body.reason){ toast("Add a reason / thesis first","err"); return; }
   try{
     await api("/api/journal/open",{method:"POST",body:JSON.stringify(body)});

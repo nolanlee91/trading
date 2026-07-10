@@ -33,6 +33,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from data import fetch_ohlcv
 from data_funding import fetch_funding
 from data_oi import fetch_oi
+from decision import decision_state
 from indicators import atr, ema, rsi
 from levels import sr_levels
 from structure import market_structure
@@ -355,6 +356,17 @@ def analyze_coin(symbol: str, force: bool) -> dict:
             **ms}
 
 
+def _btc_regime(btc: dict) -> dict:
+    """Rút gọn bối cảnh BTC để mọi coin dùng chung trong Decision State (Layer 7)."""
+    s4 = btc.get("structure_4h") or {}
+    return {"trend_4h": btc.get("trend_4h"), "trend_1d": btc.get("trend_1d"),
+            "structure_4h": s4.get("state"), "event": s4.get("event"),
+            "price_location": btc.get("price_location"),
+            "premium_discount": btc.get("premium_discount"),
+            "liquidity_above": btc.get("liquidity_above"),
+            "liquidity_below": btc.get("liquidity_below"), "bias": btc.get("bias")}
+
+
 def refresh(force: bool = False) -> None:
     coins = []
     for base in COINS:
@@ -363,6 +375,14 @@ def refresh(force: bool = False) -> None:
             coins.append(analyze_coin(label, force))
         except Exception as e:
             coins.append({"symbol": label, "error": str(e)})
+    # Layer 7: Decision State — cần BTC trước để làm btc_regime cho các coin khác.
+    btc = next((c for c in coins if c.get("symbol", "").startswith("BTC") and not c.get("error")), None)
+    regime = _btc_regime(btc) if btc else {}
+    for c in coins:
+        if c.get("error"):
+            continue
+        c["btc_regime"] = "" if c is btc else f"{regime.get('structure_4h')}/{regime.get('price_location')}"
+        c["decision"] = decision_state(c, {} if c is btc else regime)
     with _LOCK:
         SNAPSHOT["coins"] = coins
         SNAPSHOT["asof"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -444,15 +464,20 @@ def _gemini_context() -> str:
         if c.get("error"):
             slim.append({"symbol": c.get("symbol"), "error": c["error"]})
             continue
-        slim.append({k: c.get(k) for k in (
+        row = {k: c.get(k) for k in (
             "symbol", "price", "bias", "risk_score", "risk_band", "trend_4h", "trend_1d",
             "rsi", "funding_pctl", "funding_ann", "funding_vel", "dist_atr", "atr_pct",
             "vol_ratio", "to_high", "to_low", "corr_btc", "checklist_ok", "checklist_n",
             "oi_trend", "oi_chg_pct", "price_dir", "funding_state", "deriv_read",
             "price_location", "resistance", "support",
             "structure_4h", "structure_1d", "current_zone", "premium_discount",
-            "liquidity_above", "liquidity_below", "fvg_up", "fvg_down",
-            "flags")})
+            "liquidity_above", "liquidity_below", "fvg_up", "fvg_down", "btc_regime",
+            "flags")}
+        d = c.get("decision") or {}
+        row["decision"] = d.get("label")
+        row["setup_score"] = f"{d.get('score')}/{d.get('max')}" if d else None
+        row["invalidation"] = d.get("invalidation")
+        slim.append(row)
     return json.dumps({"asof": asof, "source": source, "coins": slim}, ensure_ascii=False)
 
 
@@ -564,6 +589,10 @@ def init_db() -> None:
     # Module 3: cột ngữ cảnh cấu trúc/SMC (TEXT).
     for col in ("ctx_structure_4h", "ctx_structure_1d", "ctx_current_zone",
                 "ctx_liq_above", "ctx_liq_below"):
+        if col not in have:
+            run_write(f"ALTER TABLE trades ADD COLUMN {col} TEXT")
+    # Layer 7: btc_regime (ctx) + entry_type (anticipation/confirmation — attr của lệnh).
+    for col in ("ctx_btc_regime", "entry_type"):
         if col not in have:
             run_write(f"ALTER TABLE trades ADD COLUMN {col} TEXT")
 
@@ -691,8 +720,10 @@ async def journal_open(req: Request) -> JSONResponse:
            "ctx_vol_ratio,ctx_to_high,ctx_to_low,ctx_corr_btc,"
            "ctx_oi_trend,ctx_funding_state,ctx_price_dir,"
            "ctx_price_location,ctx_nearest_res,ctx_nearest_sup,"
-           "ctx_structure_4h,ctx_structure_1d,ctx_current_zone,ctx_liq_above,ctx_liq_below,status) "
-           f"VALUES({','.join([PH] * 25)},'open')")
+           "ctx_structure_4h,ctx_structure_1d,ctx_current_zone,ctx_liq_above,ctx_liq_below,"
+           "ctx_btc_regime,entry_type,status) "
+           f"VALUES({','.join([PH] * 27)},'open')")
+    entry_type = b.get("entry_type") or (ctx.get("decision") or {}).get("stage")
     params = (now, b["symbol"], b.get("side", "long").lower(), b.get("reason", ""),
               ctx.get("price"), ctx.get("funding_pctl"), ctx.get("trend_4h"),
               ctx.get("trend_1d"), ctx.get("rsi"), ctx.get("dist_atr"),
@@ -700,7 +731,8 @@ async def journal_open(req: Request) -> JSONResponse:
               ctx.get("oi_trend"), ctx.get("funding_state"), ctx.get("price_dir"),
               ctx.get("price_location"), _zone_str(ctx.get("resistance")), _zone_str(ctx.get("support")),
               _struct_str(ctx.get("structure_4h")), _struct_str(ctx.get("structure_1d")),
-              ctx.get("current_zone"), _liq_str(ctx.get("liquidity_above")), _liq_str(ctx.get("liquidity_below")))
+              ctx.get("current_zone"), _liq_str(ctx.get("liquidity_above")), _liq_str(ctx.get("liquidity_below")),
+              ctx.get("btc_regime"), entry_type)
     rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
     return JSONResponse({"id": rid})
 
@@ -735,8 +767,9 @@ async def journal_manual(req: Request) -> JSONResponse:
            "ctx_oi_trend,ctx_funding_state,ctx_price_dir,"
            "ctx_price_location,ctx_nearest_res,ctx_nearest_sup,"
            "ctx_structure_4h,ctx_structure_1d,ctx_current_zone,ctx_liq_above,ctx_liq_below,"
+           "ctx_btc_regime,entry_type,"
            "ts_close,exit_price,pnl_pct,status) "
-           f"VALUES({','.join([PH] * 28)},'closed')")
+           f"VALUES({','.join([PH] * 30)},'closed')")
     params = (now, b.get("symbol", ""), side, b.get("reason", "") + " [nhập tay]",
               entry, ctx.get("funding_pctl"), ctx.get("trend_4h"), ctx.get("trend_1d"),
               ctx.get("rsi"), ctx.get("dist_atr"),
@@ -745,6 +778,7 @@ async def journal_manual(req: Request) -> JSONResponse:
               ctx.get("price_location"), _zone_str(ctx.get("resistance")), _zone_str(ctx.get("support")),
               _struct_str(ctx.get("structure_4h")), _struct_str(ctx.get("structure_1d")),
               ctx.get("current_zone"), _liq_str(ctx.get("liquidity_above")), _liq_str(ctx.get("liquidity_below")),
+              ctx.get("btc_regime"), b.get("entry_type"),
               now, exitp, round(pnl * 100, 2))
     rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
     return JSONResponse({"id": rid, "pnl_pct": round(pnl * 100, 2)})
