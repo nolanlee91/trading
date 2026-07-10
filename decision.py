@@ -36,6 +36,8 @@ def _short_conditions(c: dict, btc: dict) -> list[dict]:
                         and btc.get("premium_discount") == "premium"))
     btc_ok = not btc_break_up
     clear_inval = s4.get("invalidation") is not None or c.get("resistance") is not None
+    scvd = c.get("spot_cvd_state")
+    spot_weak = None if scvd is None else scvd in ("selling", "flat")   # spot KHÔNG mua chủ động
 
     return [
         {"label": "Giá tại H4/D1 supply (resistance/premium)", "ok": at_supply},
@@ -43,7 +45,7 @@ def _short_conditions(c: dict, btc: dict) -> list[dict]:
         {"label": "Funding dương (long đang trả phí)", "ok": funding_pos},
         {"label": "OI không đỡ rally long thật", "ok": oi_not_long},
         {"label": "BTC không phá lên kháng cự chính", "ok": btc_ok},
-        {"label": "Spot flow yếu / không mua chủ động", "ok": None},   # Module 5
+        {"label": "Spot flow yếu / không mua chủ động", "ok": spot_weak},   # Module 5
         {"label": "Có invalidation rõ phía trên vùng", "ok": clear_inval},
     ]
 
@@ -65,6 +67,8 @@ def _long_conditions(c: dict, btc: dict) -> list[dict]:
                         and btc.get("premium_discount") == "discount"))
     btc_ok = not btc_break_dn
     clear_inval = s4.get("invalidation") is not None or c.get("support") is not None
+    scvd = c.get("spot_cvd_state")
+    spot_ok = None if scvd is None else scvd in ("buying", "flat")   # spot KHÔNG bán tháo
 
     return [
         {"label": "Giá tại H4/D1 demand (support/discount)", "ok": at_demand},
@@ -72,7 +76,7 @@ def _long_conditions(c: dict, btc: dict) -> list[dict]:
         {"label": "Funding không đông long (âm/trung tính)", "ok": funding_neg},
         {"label": "OI không đỡ bán short thật", "ok": oi_not_short},
         {"label": "BTC không phá xuống hỗ trợ chính", "ok": btc_ok},
-        {"label": "Spot flow không bán tháo / có cầu", "ok": None},   # Module 5
+        {"label": "Spot flow không bán tháo / có cầu", "ok": spot_ok},   # Module 5
         {"label": "Có invalidation rõ phía dưới vùng", "ok": clear_inval},
     ]
 
@@ -143,7 +147,7 @@ def decision_state(c: dict, btc: dict) -> dict:
             liq = btc.get("liquidity_below") if direction == "short" else btc.get("liquidity_above")
             reasons.append(f"BTC {btc.get('structure_4h')}/{btc.get('price_location')}"
                            + (f" · liquidity {side} {('/'.join(f'{v:g}' for v in liq))}" if liq else ""))
-        reasons.append("Spot flow: chưa có data (Module 5)")
+        reasons.append(f"Spot flow: {c.get('flow_read') or 'chưa có data'}")
 
     # Invalidation
     inval = (c.get("structure_4h") or {}).get("invalidation")

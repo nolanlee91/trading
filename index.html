@@ -393,6 +393,19 @@ input,select,textarea{font-family:inherit;}
 .dc-ci.ok .mk{background:var(--bull-dim);color:var(--bull);} .dc-ci.no .mk{background:var(--bear-dim);color:var(--bear);} .dc-ci.unk .mk{background:var(--border);color:var(--muted);}
 .dc-ci.no{color:var(--text-2);} .dc-ci.unk{color:var(--muted);}
 
+/* ---------- Spot / Perp Flow (Module 5: CVD proxy) ---------- */
+.flow{margin-top:11px;background:var(--card-2);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;}
+.flow-head{font-size:9.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);padding:8px 12px 6px;display:flex;justify-content:space-between;align-items:center;}
+.flow-head .tag{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:none;letter-spacing:0;}
+.flow-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border-soft);border-top:1px solid var(--border-soft);border-bottom:1px solid var(--border-soft);}
+.flow-cell{background:var(--card-2);padding:7px 11px;display:flex;flex-direction:column;gap:2px;}
+.flow-cell .fk{font-size:9px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);font-weight:600;}
+.flow-cell .fv{font-family:var(--mono);font-size:12px;font-weight:600;}
+.flow-cell .fv small{font-size:9.5px;color:var(--text-2);font-weight:500;}
+.flow-cell .fv.buying{color:var(--bull);} .flow-cell .fv.selling{color:var(--bear);} .flow-cell .fv.flat{color:var(--text-2);}
+.flow-read{padding:8px 12px;font-size:12px;font-weight:550;color:var(--text);display:flex;align-items:center;gap:7px;}
+.flow-read::before{content:"";flex:none;width:5px;height:5px;border-radius:50%;background:var(--info);}
+
 /* ---------- Level 2 + 3 (expandable) ---------- */
 .coin-more{
   display:grid;grid-template-rows:0fr;
@@ -831,6 +844,8 @@ const MOCK = {
           structure_4h:{state:"bullish",event:"BOS",invalidation:65100}, structure_1d:{state:"bullish",event:"BOS"},
           current_zone:"H4 Premium (supply-side)", premium_discount:"premium",
           liquidity_above:[68900,69800,71200], liquidity_below:[65650,64200,62000],
+          spot_state:"buying", spot_ratio:0.71, perp_state:"buying", perp_ratio:0.68, coinbase_prem_bps:6.2,
+          spot_cvd_state:"buying", flow_read:"Spot mua + OI tăng — cầu thật (real demand)",
           btc_regime:"", decision:{direction:"long",stage:"confirmation",label:"LONG SETUP — Confirmation",grade:"setup",score:5,max:7,
             invalidation:"H4 đóng nến DƯỚI 65100",
             reasons:["H4 bullish (BOS)","Giá: discount · H4 Demand","Funding neutral · OI rising · New longs — cầu thật","Spot flow: chưa có data (Module 5)"],
@@ -855,6 +870,8 @@ const MOCK = {
           structure_4h:{state:"bearish",event:"CHOCH",invalidation:3320}, structure_1d:{state:"bullish",event:null},
           current_zone:"H4 Supply (FVG)", premium_discount:"premium",
           liquidity_above:[3320,3410,3520], liquidity_below:[3175,3080,2960],
+          spot_state:"flat", spot_ratio:0.49, perp_state:"buying", perp_ratio:0.63, coinbase_prem_bps:-9.7,
+          spot_cvd_state:"flat", flow_read:"Perp mua nhưng spot không theo — rally yếu",
           btc_regime:"bullish/premium", decision:{direction:"short",stage:"anticipation",label:"SHORT SETUP — Anticipation",grade:"setup",score:5,max:7,
             invalidation:"H4 đóng nến TRÊN 3320",
             reasons:["H4 bearish (CHOCH)","Giá: at_resistance · H4 Supply (FVG)","Funding positive · OI falling · Short covering — rally yếu","BTC bullish/premium · liquidity below 65650/64200/62000","Spot flow: chưa có data (Module 5)"],
@@ -879,6 +896,8 @@ const MOCK = {
           structure_4h:{state:"bearish",event:"BOS",invalidation:149.85}, structure_1d:{state:"bearish",event:"CHOCH"},
           current_zone:"H4 Discount (demand-side)", premium_discount:"discount",
           liquidity_above:[148.5,152.0,158.4], liquidity_below:[138.9,134.2,128.0],
+          spot_state:"selling", spot_ratio:0.38, perp_state:"buying", perp_ratio:0.61, coinbase_prem_bps:null,
+          spot_cvd_state:"selling", flow_read:"Perp đỡ giá, spot xả — thiếu bền",
           btc_regime:"bullish/premium", decision:{direction:"short",stage:"confirmation",label:"SHORT WATCH — Confirmation",grade:"watch",score:4,max:7,
             invalidation:"H4 đóng nến TRÊN 149.85",
             reasons:["H4 bearish (BOS)","Giá: discount (chưa tới supply)","Funding positive · OI rising · New shorts","Spot flow: chưa có data (Module 5)"],
@@ -903,6 +922,8 @@ const MOCK = {
           structure_4h:{state:"bullish",event:"CHOCH",invalidation:27.3}, structure_1d:{state:"bullish",event:"BOS"},
           current_zone:"H4 Equilibrium", premium_discount:"equilibrium",
           liquidity_above:[30.4,31.8,33.5], liquidity_below:[27.3,26.0,24.5],
+          spot_state:"buying", spot_ratio:0.66, perp_state:"flat", perp_ratio:0.52, coinbase_prem_bps:null,
+          spot_cvd_state:"buying", flow_read:"Spot mua dẫn — cầu thật (real demand)",
           btc_regime:"bullish/premium", decision:{direction:"none",stage:null,label:"NO SETUP — đứng ngoài",grade:"none",score:2,max:7,
             invalidation:null,
             reasons:[],
@@ -1072,6 +1093,21 @@ function renderCoins(coins){
         </div>
       </div>`;
 
+    // Module 5: Spot / Perp Flow (CVD proxy)
+    const flowState=(s,r)=>{const st=s||"flat";const lab={buying:"Buying",selling:"Selling",flat:"Flat"}[st]||"—";
+      return `<span class="fv ${st}">${lab}${r!=null?` <small>${r}</small>`:""}</span>`;};
+    const prem=c.coinbase_prem_bps;
+    const flow = (c.spot_state||c.perp_state||c.flow_read) ? `
+      <div class="flow">
+        <div class="flow-head"><span>Spot / Perp Flow</span><span class="tag">CVD proxy · ~1h</span></div>
+        <div class="flow-grid">
+          <div class="flow-cell"><span class="fk">Spot</span>${flowState(c.spot_state,c.spot_ratio)}</div>
+          <div class="flow-cell"><span class="fk">Perp</span>${flowState(c.perp_state,c.perp_ratio)}</div>
+          <div class="flow-cell"><span class="fk">CB Prem</span><span class="fv ${prem>0?'buying':prem<0?'selling':'flat'}">${prem!=null?(prem>0?'+':'')+prem+'bps':'—'}</span></div>
+        </div>
+        <div class="flow-read">${c.flow_read||"—"}</div>
+      </div>` : "";
+
     // Layer 7: Decision State (banner tổng hợp)
     const dec = c.decision || {};
     const decCls = dec.direction==="short"?"dir-short":dec.direction==="long"?"dir-long":"dir-none";
@@ -1137,6 +1173,8 @@ function renderCoins(coins){
         ${loc}
 
         ${struct}
+
+        ${flow}
 
         ${flags?`<div class="flags">${flags}</div>`:""}
 
