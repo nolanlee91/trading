@@ -144,6 +144,73 @@ App tự gắn cờ khi gặp bối cảnh đáng chú ý:
 
 ---
 
+# PHẦN 1B — 7 LAYER MỚI (SMC · Derivatives · Flow · Liquidity · Decision)
+
+> Từ 2026-07 HUD nâng từ 4 → **7 layer + Decision State**. Mỗi card coin có thêm
+> nhiều block. Đọc phần này để hiểu từng block. **Lưu ý:** hai block *Spot/Perp Flow*
+> và *Liquidity Map* là **BẢN XẤP XỈ** (không có data heatmap/CVD chuẩn free) — dùng
+> tham khảo hướng, đừng tin tuyệt đối.
+
+## 1B.1. Block DERIVATIVES READ (Price × OI × Funding)
+Không chỉ hiện funding, mà diễn giải **combo**: OI (open interest = tổng vị thế mở)
+đang tăng/giảm so với giá:
+- Giá LÊN + OI TĂNG = **new longs** (cầu thật). · Giá LÊN + OI GIẢM = **short covering**
+  (rally yếu, không phải cầu thật).
+- Giá XUỐNG + OI TĂNG = **new shorts** (bán thật). · Giá XUỐNG + OI GIẢM = **long
+  closing** (xả đòn bẩy).
+OI lấy từ Bybit (Hyperliquid không trả OI lịch sử). "Short covering + funding dương" =
+cờ bẫy: rally do đóng short, dễ hết hơi.
+
+## 1B.2. Block STRUCTURE · LOCATION (Support/Resistance)
+Tự tạo vùng S/R từ nhiều nguồn (swing, nến volume-spike, 30D high/low, prev day/week
+high/low) rồi **chấm strength X/5** = số nguồn độc lập cùng chỉ tới mức đó + số lần chạm.
+- **Resist / Support**: vùng gần nhất trên/dưới giá + strength (thanh 5 vạch).
+- **Price location**: `At Resistance` / `At Support` / `Premium` / `Discount` / `Mid`.
+- Nhiều nguồn cùng chỉ 1 mức (4/5, 5/5) = mức đáng tin để canh vào/thoát.
+
+## 1B.3. Block MARKET STRUCTURE (SMC)
+Đọc **dòng chảy cấu trúc** trên 4H và 1D:
+- **State**: bullish (HH+HL) / bearish (LH+LL) / ranging.
+- **BOS** (break of structure = tiếp diễn) vs **CHOCH** (change of character = đảo chiều
+  sớm). CHOCH = cảnh báo cấu trúc vừa đổi tính chất.
+- **Inval 4H**: mức mà nếu đóng nến qua đó, luận điểm hiện tại hỏng.
+- **Liq ▲ / ▼**: thanh khoản (swing/equal high-low) gần nhất phía trên/dưới — nơi stop
+  đang nằm chờ bị quét.
+
+## 1B.4. Block SPOT / PERP FLOW *(xấp xỉ)*
+Ai đang **chủ động mua/bán** ngay lúc này (taker buy vs sell), tách spot và perp:
+- **Spot / Perp**: `Buying` / `Selling` / `Flat` + tỷ lệ buy (0–1).
+- **CB Prem**: Coinbase premium (BTC/ETH) — US spot bid, dương = cầu Mỹ mạnh.
+- Diễn giải: "Spot mua + OI tăng = cầu thật" · "Perp mua nhưng spot không theo = rally
+  yếu" · "Perp đỡ, spot xả = thiếu bền". *Cửa sổ mẫu ngắn (~1h rolling), tham khảo.*
+
+## 1B.5. Block LIQUIDITY MAP *(xấp xỉ)*
+- **Liq ▲ / ▼**: vùng thanh khoản (stop) gần nhất trên/dưới + khoảng cách %.
+- **Long liq / Short liq**: mức thanh lý ước lượng theo đòn bẩy (50-100x ~2%, 25x ~4%,
+  10x ~10%). Long bị thanh lý DƯỚI giá, short TRÊN giá.
+- **Magnet**: `downside` / `upside` / `balanced` — phía nào là "nam châm" (giá dễ bị hút
+  về ổ thanh khoản lớn/gần hơn), tổng hợp premium-discount + khoảng cách + funding.
+
+## 1B.6. DECISION STATE (banner tổng hợp — đọc ĐẦU TIÊN)
+Ở đầu mỗi card, hợp nhất cả 6 layer thành **1 kết luận**:
+```
+SHORT SETUP — Anticipation                 5/7
+✕ Invalidation: H4 đóng nến TRÊN 3320
+• H4 bearish (CHOCH) · Giá at_resistance · Funding+ · OI falling · ...
+```
+- **Direction + stage**: `SHORT/LONG SETUP` + `Anticipation` (giá ở zone nhưng cấu trúc
+  chưa xác nhận — vào sớm) / `Confirmation` (cấu trúc đã khớp hướng).
+- **Checklist 7 điều kiện** (xem expand card): ≥5/7 mới là setup đẹp. Điều kiện #1 (giá
+  phải ĐANG ở zone) là bắt buộc — thiếu nó chỉ là `WATCH`, chưa hành động.
+- **NO SETUP — 2 chiều xung đột**: tín hiệu long/short ngang nhau → đứng ngoài.
+- **entry_type** (Anticipation/Confirmation) được lưu vào journal → sau này biết bạn
+  thắng ở kiểu vào nào.
+
+> Cách dùng nhanh: đọc **Decision State** trước. SETUP đẹp + Confirmation = ưu tiên.
+> Anticipation = vào sớm, size nhỏ, canh invalidation chặt. NO SETUP = bỏ qua.
+
+---
+
 # PHẦN 2 — CÁCH KẾT HỢP CÁC CHỈ SỐ
 
 Thứ tự đọc một coin (từ thô đến tinh). Đừng nhìn lẻ từng chỉ số — đọc theo tầng:
