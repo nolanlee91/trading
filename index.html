@@ -353,6 +353,24 @@ input,select,textarea{font-family:inherit;}
 .loc-row.r .lr-s .bars i.on{background:var(--bear);}
 .loc-row.s .lr-s .bars i.on{background:var(--bull);}
 
+/* ---------- Market Structure (Module 3: SMC) ---------- */
+.struct{margin-top:11px;background:var(--card-2);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;}
+.struct-head{font-size:9.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);padding:8px 12px 6px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
+.struct-head .zone{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--text-2);text-transform:none;letter-spacing:0;}
+.struct-tf{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border-soft);border-top:1px solid var(--border-soft);border-bottom:1px solid var(--border-soft);}
+.stf{background:var(--card-2);padding:7px 11px;display:flex;align-items:center;gap:7px;font-size:11px;}
+.stf .tflab{font-size:9px;letter-spacing:.4px;color:var(--muted);font-weight:700;}
+.stf .st{font-family:var(--mono);font-size:11.5px;font-weight:700;letter-spacing:.2px;}
+.stf .st.bullish{color:var(--bull);} .stf .st.bearish{color:var(--bear);} .stf .st.ranging{color:var(--mixed);}
+.stf .ev{font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;letter-spacing:.3px;}
+.stf .ev.BOS{background:var(--info-dim);color:#79c0ff;}
+.stf .ev.CHOCH{background:var(--mixed-dim);color:#e6bd60;}
+.struct-liq{padding:8px 12px 10px;display:flex;flex-direction:column;gap:4px;font-size:11px;}
+.struct-liq .sl{display:grid;grid-template-columns:52px 1fr;gap:8px;align-items:center;}
+.struct-liq .sl .slk{font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);font-weight:600;}
+.struct-liq .sl .slv{font-family:var(--mono);font-weight:600;color:var(--text);}
+.struct-liq .sl .slv.up{color:var(--bear);} .struct-liq .sl .slv.dn{color:var(--bull);}
+
 /* ---------- Level 2 + 3 (expandable) ---------- */
 .coin-more{
   display:grid;grid-template-rows:0fr;
@@ -780,7 +798,10 @@ const MOCK = {
           funding_state:"positive", deriv_read:"New longs — cầu thật đang vào",
           price_location:"premium",
           resistance:{lo:68900,hi:69350,mid:69125,strength:4,dist_pct:2.5,sources:["swing 1D","prev week high"],touches:5},
-          support:{lo:65100,hi:66200,mid:65650,strength:5,dist_pct:-2.6,sources:["30D low","swing 1D","vol spike 1D"],touches:38} },
+          support:{lo:65100,hi:66200,mid:65650,strength:5,dist_pct:-2.6,sources:["30D low","swing 1D","vol spike 1D"],touches:38},
+          structure_4h:{state:"bullish",event:"BOS",invalidation:65100}, structure_1d:{state:"bullish",event:"BOS"},
+          current_zone:"H4 Premium (supply-side)", premium_discount:"premium",
+          liquidity_above:[68900,69800,71200], liquidity_below:[65650,64200,62000] },
 
         { symbol:"ETH", price:3284.18, trend_4h:"up", trend_1d:"flat",
           dist_atr:1.4, rsi:51.2, ret7:0.8,
@@ -797,7 +818,10 @@ const MOCK = {
           funding_state:"positive", deriv_read:"Short covering — rally yếu, KHÔNG phải cầu thật",
           price_location:"at_resistance",
           resistance:{lo:3270,hi:3320,mid:3295,strength:4,dist_pct:0.3,sources:["swing 4H","vol spike 1D","prev day high"],touches:9},
-          support:{lo:3150,hi:3200,mid:3175,strength:3,dist_pct:-3.3,sources:["swing 1D","vol spike 4H"],touches:14} },
+          support:{lo:3150,hi:3200,mid:3175,strength:3,dist_pct:-3.3,sources:["swing 1D","vol spike 4H"],touches:14},
+          structure_4h:{state:"bearish",event:"CHOCH",invalidation:3320}, structure_1d:{state:"bullish",event:null},
+          current_zone:"H4 Supply (FVG)", premium_discount:"premium",
+          liquidity_above:[3320,3410,3520], liquidity_below:[3175,3080,2960] },
 
         { symbol:"SOL", price:142.07, trend_4h:"down", trend_1d:"down",
           dist_atr:2.6, rsi:71.8, ret7:-6.4,
@@ -814,7 +838,10 @@ const MOCK = {
           funding_state:"positive", deriv_read:"New shorts — lực bán thật đang vào",
           price_location:"discount",
           resistance:{lo:148.5,hi:151.2,mid:149.85,strength:5,dist_pct:5.5,sources:["30D high","swing 1D","vol spike 1D","prev week high"],touches:12},
-          support:{lo:138.2,hi:139.6,mid:138.9,strength:3,dist_pct:-2.2,sources:["swing 4H","vol spike 4H"],touches:7} },
+          support:{lo:138.2,hi:139.6,mid:138.9,strength:3,dist_pct:-2.2,sources:["swing 4H","vol spike 4H"],touches:7},
+          structure_4h:{state:"bearish",event:"BOS",invalidation:149.85}, structure_1d:{state:"bearish",event:"CHOCH"},
+          current_zone:"H4 Discount (demand-side)", premium_discount:"discount",
+          liquidity_above:[148.5,152.0,158.4], liquidity_below:[138.9,134.2,128.0] },
 
         { symbol:"HYPE", price:28.94, trend_4h:"up", trend_1d:"up",
           dist_atr:0.5, rsi:54.0, ret7:7.1,
@@ -831,7 +858,10 @@ const MOCK = {
           funding_state:"neutral", deriv_read:"Trầm lắng — không có tín hiệu phái sinh",
           price_location:"mid",
           resistance:{lo:30.4,hi:31.1,mid:30.75,strength:3,dist_pct:6.3,sources:["swing 4H","vol spike 4H"],touches:11},
-          support:{lo:27.0,hi:27.6,mid:27.3,strength:4,dist_pct:-5.7,sources:["swing 1D","swing 4H","vol spike 4H"],touches:19} }
+          support:{lo:27.0,hi:27.6,mid:27.3,strength:4,dist_pct:-5.7,sources:["swing 1D","swing 4H","vol spike 4H"],touches:19},
+          structure_4h:{state:"bullish",event:"CHOCH",invalidation:27.3}, structure_1d:{state:"bullish",event:"BOS"},
+          current_zone:"H4 Equilibrium", premium_discount:"equilibrium",
+          liquidity_above:[30.4,31.8,33.5], liquidity_below:[27.3,26.0,24.5] }
       ]
     };
   },
@@ -982,6 +1012,21 @@ function renderCoins(coins){
         </div>
       </div>`;
 
+    // Module 3: Market Structure (SMC)
+    const s4=c.structure_4h||{}, s1=c.structure_1d||{};
+    const tfCell=(lab,s)=>`<div class="stf"><span class="tflab">${lab}</span><span class="st ${s.state||'ranging'}">${(s.state||'—').toUpperCase()}</span>${s.event?`<span class="ev ${s.event}">${s.event}</span>`:""}</div>`;
+    const liqStr=(a)=>(a&&a.length)?a.map(fmtPrice).join(" / "):"—";
+    const struct = `
+      <div class="struct">
+        <div class="struct-head"><span>Market Structure</span>${c.current_zone?`<span class="zone">${c.current_zone}</span>`:""}</div>
+        <div class="struct-tf">${tfCell("4H",s4)}${tfCell("1D",s1)}</div>
+        <div class="struct-liq">
+          <div class="sl"><span class="slk">Inval 4H</span><span class="slv">${s4.invalidation!=null?fmtPrice(s4.invalidation):"—"}</span></div>
+          <div class="sl"><span class="slk">Liq ▲</span><span class="slv up">${liqStr(c.liquidity_above)}</span></div>
+          <div class="sl"><span class="slk">Liq ▼</span><span class="slv dn">${liqStr(c.liquidity_below)}</span></div>
+        </div>
+      </div>`;
+
     const fullCl = c.checklist.map(x=>`<div class="cl-item ${x.ok?'':'fail'}"><span class="mk ${x.ok?'ok':'no'}">${x.ok?'✓':'✕'}</span><span class="lab">${x.label}</span></div>`).join("");
 
     const raw = [
@@ -1029,6 +1074,8 @@ function renderCoins(coins){
         ${deriv}
 
         ${loc}
+
+        ${struct}
 
         ${flags?`<div class="flags">${flags}</div>`:""}
 
