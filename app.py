@@ -32,6 +32,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from data import fetch_ohlcv
 from data_funding import fetch_funding
+from data_oi import fetch_oi
 from indicators import atr, ema, rsi
 
 # Coin theo BASE asset; nhãn hiển thị (cũng là key journal) giữ ổn định để không
@@ -124,6 +125,60 @@ def _btc_ref_d1():
     return d["close"]
 
 
+def _derivatives_read(oi_df, price_now: float, price_24h: float | None, funding_ann: float) -> dict:
+    """Module 1 — diễn giải combo Price × OI × Funding (không chỉ hiện số funding).
+
+    Logic kinh điển của thị trường phái sinh:
+      giá LÊN + OI TĂNG  = new longs (cầu thật)
+      giá LÊN + OI GIẢM  = short covering (rally yếu, không phải cầu thật)
+      giá XUỐNG + OI TĂNG = new shorts (lực bán thật)
+      giá XUỐNG + OI GIẢM = long closing / deleveraging (xả đòn bẩy)
+    OI trend đo bằng % đổi trung bình 24h gần nhất so với 24h trước (proxy Bybit).
+    """
+    # ── OI trend: so trung bình ~24h gần nhất với ~24h trước (điểm 1h) ──
+    oi_now = oi_trend = None
+    oi_chg = 0.0
+    if oi_df is not None and len(oi_df) >= 48:
+        s = oi_df["oi"]
+        recent = float(s.iloc[-24:].mean())
+        prior = float(s.iloc[-48:-24].mean())
+        oi_now = float(s.iloc[-1])
+        oi_chg = (recent / prior - 1) * 100 if prior else 0.0
+        oi_trend = "rising" if oi_chg > 2 else "falling" if oi_chg < -2 else "flat"
+
+    # ── Price direction 24h ──
+    if price_24h:
+        pchg = (price_now / price_24h - 1) * 100
+        price_dir = "up" if pchg > 0.75 else "down" if pchg < -0.75 else "sideway"
+    else:
+        pchg, price_dir = 0.0, "sideway"
+
+    # ── Funding state (theo %/năm, deadband 2%) ──
+    funding_state = ("positive" if funding_ann > 2 else "negative" if funding_ann < -2 else "neutral")
+
+    # ── Diễn giải combo ──
+    if oi_trend is None:
+        read = "OI không có dữ liệu"
+    else:
+        table = {
+            ("up", "rising"): "New longs — cầu thật đang vào",
+            ("up", "falling"): "Short covering — rally yếu, KHÔNG phải cầu thật",
+            ("up", "flat"): "Giá lên nhưng OI đứng — thiếu lực xác nhận",
+            ("down", "rising"): "New shorts — lực bán thật đang vào",
+            ("down", "falling"): "Long closing / deleveraging — xả đòn bẩy",
+            ("down", "flat"): "Giá xuống, OI đứng — chưa rõ lực",
+            ("sideway", "rising"): "Tích luỹ vị thế 2 chiều — chờ phá biên",
+            ("sideway", "falling"): "Giảm đòn bẩy, đi ngang",
+            ("sideway", "flat"): "Trầm lắng — không có tín hiệu phái sinh",
+        }
+        read = table.get((price_dir, oi_trend), "—")
+
+    return {"oi_now": round(oi_now) if oi_now is not None else None,
+            "oi_trend": oi_trend, "oi_chg_pct": round(oi_chg, 1),
+            "price_dir": price_dir, "price_chg_24h": round(pchg, 1),
+            "funding_state": funding_state, "deriv_read": read}
+
+
 def analyze_coin(symbol: str, force: bool) -> dict:
     """symbol = nhãn hiển thị (vd 'BTC/USDT'); base lấy phần trước '/'."""
     base = symbol.split("/")[0]
@@ -183,6 +238,14 @@ def analyze_coin(symbol: str, force: bool) -> dict:
     vel_num = (round((fr.iloc[-w:].mean() - fr.iloc[-2 * w:-w].mean()) * (24 / fund_h) * 365 * 100, 2)
                if len(fr) >= 2 * w else 0.0)
 
+    # ── Module 1: Derivatives Read (Price × OI × Funding) ──
+    try:
+        oi_df = fetch_oi(base, CACHE, force=force)
+    except Exception:
+        oi_df = None
+    px_24h = float(h4["close"].iloc[-7]) if len(h4) >= 7 else None   # 6 nến 4H = 24h
+    deriv = _derivatives_read(oi_df, px, px_24h, ann)
+
     # Bias = đánh THEO trend 4H (đừng đánh ngược trend lớn).
     bias = "long" if t4 == "bullish" else "short" if t4 == "bearish" else "neutral"
 
@@ -238,6 +301,11 @@ def analyze_coin(symbol: str, force: bool) -> dict:
         flags.append(f"Sát ĐỈNH 30 ngày (cách {to_high}%) — coi chừng kháng cự")
     elif to_low <= 2:
         flags.append(f"Sát ĐÁY 30 ngày (+{to_low}%) — coi chừng hỗ trợ/đảo chiều")
+    # Cờ phái sinh: các combo "bẫy" đáng chú ý nhất
+    if deriv["price_dir"] == "up" and deriv["oi_trend"] == "falling" and deriv["funding_state"] == "positive":
+        flags.append("Short covering + funding dương — rally do đóng short, không phải cầu thật")
+    elif deriv["price_dir"] == "down" and deriv["oi_trend"] == "rising" and deriv["funding_state"] == "negative":
+        flags.append("New shorts + funding âm — đông short, coi chừng squeeze LÊN")
 
     return {"symbol": symbol, "price": px, "trend_4h": t4, "trend_1d": t1d,
             "dist_atr": round(dist_atr, 2), "rsi": round(r_now, 0),
@@ -247,7 +315,7 @@ def analyze_coin(symbol: str, force: bool) -> dict:
             "vol_ratio": vol_ratio, "to_high": to_high, "to_low": to_low, "corr_btc": corr_btc,
             "bias": bias, "risk_score": risk, "risk_band": band, "risk_why": why,
             "checklist": checklist, "checklist_ok": n_ok, "checklist_n": len(checklist),
-            "flags": flags}
+            "flags": flags, **deriv}
 
 
 def refresh(force: bool = False) -> None:
@@ -322,6 +390,7 @@ def _gemini_context() -> str:
             "symbol", "price", "bias", "risk_score", "risk_band", "trend_4h", "trend_1d",
             "rsi", "funding_pctl", "funding_ann", "funding_vel", "dist_atr", "atr_pct",
             "vol_ratio", "to_high", "to_low", "corr_btc", "checklist_ok", "checklist_n",
+            "oi_trend", "oi_chg_pct", "price_dir", "funding_state", "deriv_read",
             "flags")})
     return json.dumps({"asof": asof, "source": source, "coins": slim}, ensure_ascii=False)
 
@@ -423,6 +492,10 @@ def init_db() -> None:
     for col in ("ctx_vol_ratio", "ctx_to_high", "ctx_to_low", "ctx_corr_btc"):
         if col not in have:
             run_write(f"ALTER TABLE trades ADD COLUMN {col} {num}")
+    # Module 1: cột ngữ cảnh phái sinh (TEXT — trạng thái, không phải số).
+    for col in ("ctx_oi_trend", "ctx_funding_state", "ctx_price_dir"):
+        if col not in have:
+            run_write(f"ALTER TABLE trades ADD COLUMN {col} TEXT")
 
     # N-4: ảnh chụp bối cảnh thị trường mỗi ngày (kể cả ngày KHÔNG vào lệnh) để
     # sau này so "ngày đánh vs ngày bỏ qua". 1 dòng / coin / ngày (snap_date UTC).
@@ -545,12 +618,14 @@ async def journal_open(req: Request) -> JSONResponse:
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M")
     sql = ("INSERT INTO trades(ts_open,symbol,side,reason,ctx_price,ctx_funding_pctl,"
            "ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,"
-           "ctx_vol_ratio,ctx_to_high,ctx_to_low,ctx_corr_btc,status) "
-           f"VALUES({','.join([PH] * 14)},'open')")
+           "ctx_vol_ratio,ctx_to_high,ctx_to_low,ctx_corr_btc,"
+           "ctx_oi_trend,ctx_funding_state,ctx_price_dir,status) "
+           f"VALUES({','.join([PH] * 17)},'open')")
     params = (now, b["symbol"], b.get("side", "long").lower(), b.get("reason", ""),
               ctx.get("price"), ctx.get("funding_pctl"), ctx.get("trend_4h"),
               ctx.get("trend_1d"), ctx.get("rsi"), ctx.get("dist_atr"),
-              ctx.get("vol_ratio"), ctx.get("to_high"), ctx.get("to_low"), ctx.get("corr_btc"))
+              ctx.get("vol_ratio"), ctx.get("to_high"), ctx.get("to_low"), ctx.get("corr_btc"),
+              ctx.get("oi_trend"), ctx.get("funding_state"), ctx.get("price_dir"))
     rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
     return JSONResponse({"id": rid})
 
@@ -582,12 +657,14 @@ async def journal_manual(req: Request) -> JSONResponse:
     sql = ("INSERT INTO trades(ts_open,symbol,side,reason,ctx_price,ctx_funding_pctl,"
            "ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,"
            "ctx_vol_ratio,ctx_to_high,ctx_to_low,ctx_corr_btc,"
+           "ctx_oi_trend,ctx_funding_state,ctx_price_dir,"
            "ts_close,exit_price,pnl_pct,status) "
-           f"VALUES({','.join([PH] * 17)},'closed')")
+           f"VALUES({','.join([PH] * 20)},'closed')")
     params = (now, b.get("symbol", ""), side, b.get("reason", "") + " [nhập tay]",
               entry, ctx.get("funding_pctl"), ctx.get("trend_4h"), ctx.get("trend_1d"),
               ctx.get("rsi"), ctx.get("dist_atr"),
               ctx.get("vol_ratio"), ctx.get("to_high"), ctx.get("to_low"), ctx.get("corr_btc"),
+              ctx.get("oi_trend"), ctx.get("funding_state"), ctx.get("price_dir"),
               now, exitp, round(pnl * 100, 2))
     rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
     return JSONResponse({"id": rid, "pnl_pct": round(pnl * 100, 2)})

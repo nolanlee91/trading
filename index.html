@@ -321,6 +321,19 @@ input,select,textarea{font-family:inherit;}
 .flag.warn{background:var(--mixed-dim);color:#e6bd60;border-color:rgba(210,153,34,.22);}
 .flag .fi{width:11px;height:11px;}
 
+/* ---------- Derivatives Read (Module 1: Price × OI × Funding) ---------- */
+.deriv{margin-top:11px;background:var(--card-2);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;}
+.deriv-head{font-size:9.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);padding:8px 12px 6px;}
+.deriv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border-soft);border-top:1px solid var(--border-soft);border-bottom:1px solid var(--border-soft);}
+.deriv-cell{background:var(--card-2);padding:7px 11px;display:flex;flex-direction:column;gap:2px;}
+.deriv-cell .dk{font-size:9px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);font-weight:600;}
+.deriv-cell .dv{font-family:var(--mono);font-size:12.5px;font-weight:600;}
+.deriv-cell .dv small{font-size:9.5px;color:var(--text-2);font-weight:500;}
+.deriv-read{padding:8px 12px;font-size:12px;font-weight:550;color:var(--text);display:flex;align-items:center;gap:7px;}
+.deriv-read::before{content:"";flex:none;width:5px;height:5px;border-radius:50%;background:var(--info);}
+.deriv.trap .deriv-read{color:#e6bd60;}
+.deriv.trap .deriv-read::before{background:var(--mixed);}
+
 /* ---------- Level 2 + 3 (expandable) ---------- */
 .coin-more{
   display:grid;grid-template-rows:0fr;
@@ -743,7 +756,9 @@ const MOCK = {
             {label:"4H trend up",ok:true},{label:"1D trend up",ok:true},
             {label:"Funding not crowded",ok:true},{label:"RSI not overheated",ok:true},
             {label:"Within 1 ATR of EMA20",ok:false}],
-          checklist_ok:4, checklist_n:5, flags:[] },
+          checklist_ok:4, checklist_n:5, flags:[],
+          oi_trend:"rising", oi_chg_pct:3.4, price_dir:"up", price_chg_24h:1.8,
+          funding_state:"positive", deriv_read:"New longs — cầu thật đang vào" },
 
         { symbol:"ETH", price:3284.18, trend_4h:"up", trend_1d:"flat",
           dist_atr:1.4, rsi:51.2, ret7:0.8,
@@ -755,7 +770,9 @@ const MOCK = {
             {label:"4H trend up",ok:true},{label:"1D trend up",ok:false},
             {label:"Funding not crowded",ok:true},{label:"RSI not overheated",ok:true},
             {label:"Within 1 ATR of EMA20",ok:false}],
-          checklist_ok:3, checklist_n:5, flags:["Mixed Trend"] },
+          checklist_ok:3, checklist_n:5, flags:["Mixed Trend"],
+          oi_trend:"falling", oi_chg_pct:-2.6, price_dir:"up", price_chg_24h:1.1,
+          funding_state:"positive", deriv_read:"Short covering — rally yếu, KHÔNG phải cầu thật" },
 
         { symbol:"SOL", price:142.07, trend_4h:"down", trend_1d:"down",
           dist_atr:2.6, rsi:71.8, ret7:-6.4,
@@ -767,7 +784,9 @@ const MOCK = {
             {label:"4H trend down",ok:true},{label:"1D trend down",ok:true},
             {label:"Funding not crowded",ok:false},{label:"RSI not overheated",ok:false},
             {label:"Within 1 ATR of EMA20",ok:false}],
-          checklist_ok:2, checklist_n:5, flags:["Funding Extreme","Overextended","Near 30D High","Abnormal Volume"] },
+          checklist_ok:2, checklist_n:5, flags:["Funding Extreme","Overextended","Near 30D High","Abnormal Volume"],
+          oi_trend:"rising", oi_chg_pct:5.1, price_dir:"down", price_chg_24h:-2.3,
+          funding_state:"positive", deriv_read:"New shorts — lực bán thật đang vào" },
 
         { symbol:"HYPE", price:28.94, trend_4h:"up", trend_1d:"up",
           dist_atr:0.5, rsi:54.0, ret7:7.1,
@@ -779,7 +798,9 @@ const MOCK = {
             {label:"4H trend up",ok:true},{label:"1D trend up",ok:true},
             {label:"Funding not crowded",ok:true},{label:"RSI not overheated",ok:true},
             {label:"Within 1 ATR of EMA20",ok:true}],
-          checklist_ok:5, checklist_n:5, flags:[] }
+          checklist_ok:5, checklist_n:5, flags:[],
+          oi_trend:"flat", oi_chg_pct:0.4, price_dir:"sideway", price_chg_24h:0.3,
+          funding_state:"neutral", deriv_read:"Trầm lắng — không có tín hiệu phái sinh" }
       ]
     };
   },
@@ -895,6 +916,24 @@ function renderCoins(coins){
       cell("To 30D Low", `<span class="up">${pct(c.to_low)}</span>`)
     ].join("");
 
+    // Module 1: Derivatives Read (Price × OI × Funding)
+    const hasOi = c.oi_trend!=null;
+    const trap = (c.price_dir==="up"&&c.oi_trend==="falling"&&c.funding_state==="positive")
+               ||(c.price_dir==="down"&&c.oi_trend==="rising"&&c.funding_state==="negative");
+    const fLab={positive:"Positive",negative:"Negative",neutral:"Neutral"}[c.funding_state]||"—";
+    const oiLab=hasOi?({rising:"Rising",falling:"Falling",flat:"Flat"}[c.oi_trend]):"n/a";
+    const pLab={up:"Up",down:"Down",sideway:"Sideway"}[c.price_dir]||"—";
+    const deriv = `
+      <div class="deriv${trap?" trap":""}">
+        <div class="deriv-head">Derivatives Read</div>
+        <div class="deriv-grid">
+          <div class="deriv-cell"><span class="dk">Funding</span><span class="dv ${c.funding_state==="positive"?"flat":c.funding_state==="negative"?"up":""}">${fLab}</span></div>
+          <div class="deriv-cell"><span class="dk">OI 24h</span><span class="dv ${c.oi_trend==="rising"?"up":c.oi_trend==="falling"?"down":""}">${oiLab}${hasOi?` <small>${c.oi_chg_pct>0?"+":""}${c.oi_chg_pct}%</small>`:""}</span></div>
+          <div class="deriv-cell"><span class="dk">Price 24h</span><span class="dv ${signClass(c.price_chg_24h)}">${pLab} <small>${c.price_chg_24h>0?"+":""}${c.price_chg_24h}%</small></span></div>
+        </div>
+        <div class="deriv-read">${c.deriv_read||"—"}</div>
+      </div>`;
+
     const fullCl = c.checklist.map(x=>`<div class="cl-item ${x.ok?'':'fail'}"><span class="mk ${x.ok?'ok':'no'}">${x.ok?'✓':'✕'}</span><span class="lab">${x.label}</span></div>`).join("");
 
     const raw = [
@@ -938,6 +977,8 @@ function renderCoins(coins){
           <div class="risk-bar">${segs}</div>
           <div class="risk-why">${why}</div>
         </div>
+
+        ${deriv}
 
         ${flags?`<div class="flags">${flags}</div>`:""}
 
