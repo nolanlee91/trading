@@ -37,6 +37,7 @@ from data_oi import fetch_oi
 from decision import decision_state
 from indicators import atr, ema, rsi
 from levels import sr_levels
+from liquidity import liquidity_map
 from structure import market_structure
 
 # Coin theo BASE asset; nhãn hiển thị (cũng là key journal) giữ ổn định để không
@@ -274,6 +275,13 @@ def analyze_coin(symbol: str, force: bool) -> dict:
         flow = {"spot_state": None, "spot_ratio": None, "perp_state": None, "perp_ratio": None,
                 "coinbase_prem_bps": None, "flow_read": "Flow: chưa có data", "spot_cvd_state": None}
 
+    # ── Module 6: Liquidity Map / Liquidation zones (xấp xỉ; tái dùng EQH/EQL của M3) ──
+    try:
+        liq = liquidity_map(px, atr_v, ms, deriv["oi_trend"], f_pctl)
+    except Exception:
+        liq = {"liq_above": None, "liq_below": None, "long_liq": [], "short_liq": [],
+               "liq_magnet": "balanced", "liq_magnet_why": [], "liq_oi_note": None}
+
     # Bias = đánh THEO trend 4H (đừng đánh ngược trend lớn).
     bias = "long" if t4 == "bullish" else "short" if t4 == "bearish" else "neutral"
 
@@ -354,6 +362,11 @@ def analyze_coin(symbol: str, force: bool) -> dict:
         flags.append("Perp mua nhưng spot không theo — rally do perp, thiếu cầu spot thật")
     elif flow["spot_state"] == "buying" and deriv["oi_trend"] == "rising":
         flags.append("Spot mua + OI tăng — cầu thật (real demand)")
+    # Cờ nam châm thanh khoản (Module 6)
+    if liq["liq_magnet"] == "downside" and liq["liq_below"]:
+        flags.append(f"Nam châm thanh khoản phía DƯỚI ({liq['liq_below']['lo']:g}–{liq['liq_below']['hi']:g})")
+    elif liq["liq_magnet"] == "upside" and liq["liq_above"]:
+        flags.append(f"Nam châm thanh khoản phía TRÊN ({liq['liq_above']['lo']:g}–{liq['liq_above']['hi']:g})")
 
     return {"symbol": symbol, "price": px, "trend_4h": t4, "trend_1d": t1d,
             "dist_atr": round(dist_atr, 2), "rsi": round(r_now, 0),
@@ -366,7 +379,7 @@ def analyze_coin(symbol: str, force: bool) -> dict:
             "flags": flags, **deriv,
             "price_location": sr["price_location"], "resistance": sr["resistance"],
             "support": sr["support"], "in_zone": sr["in_zone"], "sr_zones": sr["zones"],
-            **ms, **flow}
+            **ms, **flow, **liq}
 
 
 def _btc_regime(btc: dict) -> dict:
@@ -486,6 +499,7 @@ def _gemini_context() -> str:
             "structure_4h", "structure_1d", "current_zone", "premium_discount",
             "liquidity_above", "liquidity_below", "fvg_up", "fvg_down", "btc_regime",
             "spot_state", "perp_state", "flow_read", "coinbase_prem_bps",
+            "liq_above", "liq_below", "liq_magnet",
             "flags")}
         d = c.get("decision") or {}
         row["decision"] = d.get("label")
@@ -612,6 +626,9 @@ def init_db() -> None:
     # Module 5: spot flow state (ctx).
     if "ctx_spot_cvd_state" not in have:
         run_write("ALTER TABLE trades ADD COLUMN ctx_spot_cvd_state TEXT")
+    # Module 6: liquidity magnet (ctx).
+    if "ctx_liq_magnet" not in have:
+        run_write("ALTER TABLE trades ADD COLUMN ctx_liq_magnet TEXT")
 
     # N-4: ảnh chụp bối cảnh thị trường mỗi ngày (kể cả ngày KHÔNG vào lệnh) để
     # sau này so "ngày đánh vs ngày bỏ qua". 1 dòng / coin / ngày (snap_date UTC).
@@ -738,8 +755,8 @@ async def journal_open(req: Request) -> JSONResponse:
            "ctx_oi_trend,ctx_funding_state,ctx_price_dir,"
            "ctx_price_location,ctx_nearest_res,ctx_nearest_sup,"
            "ctx_structure_4h,ctx_structure_1d,ctx_current_zone,ctx_liq_above,ctx_liq_below,"
-           "ctx_btc_regime,entry_type,ctx_spot_cvd_state,status) "
-           f"VALUES({','.join([PH] * 28)},'open')")
+           "ctx_btc_regime,entry_type,ctx_spot_cvd_state,ctx_liq_magnet,status) "
+           f"VALUES({','.join([PH] * 29)},'open')")
     entry_type = b.get("entry_type") or (ctx.get("decision") or {}).get("stage")
     params = (now, b["symbol"], b.get("side", "long").lower(), b.get("reason", ""),
               ctx.get("price"), ctx.get("funding_pctl"), ctx.get("trend_4h"),
@@ -749,7 +766,7 @@ async def journal_open(req: Request) -> JSONResponse:
               ctx.get("price_location"), _zone_str(ctx.get("resistance")), _zone_str(ctx.get("support")),
               _struct_str(ctx.get("structure_4h")), _struct_str(ctx.get("structure_1d")),
               ctx.get("current_zone"), _liq_str(ctx.get("liquidity_above")), _liq_str(ctx.get("liquidity_below")),
-              ctx.get("btc_regime"), entry_type, ctx.get("spot_cvd_state"))
+              ctx.get("btc_regime"), entry_type, ctx.get("spot_cvd_state"), ctx.get("liq_magnet"))
     rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
     return JSONResponse({"id": rid})
 
@@ -784,9 +801,9 @@ async def journal_manual(req: Request) -> JSONResponse:
            "ctx_oi_trend,ctx_funding_state,ctx_price_dir,"
            "ctx_price_location,ctx_nearest_res,ctx_nearest_sup,"
            "ctx_structure_4h,ctx_structure_1d,ctx_current_zone,ctx_liq_above,ctx_liq_below,"
-           "ctx_btc_regime,entry_type,ctx_spot_cvd_state,"
+           "ctx_btc_regime,entry_type,ctx_spot_cvd_state,ctx_liq_magnet,"
            "ts_close,exit_price,pnl_pct,status) "
-           f"VALUES({','.join([PH] * 31)},'closed')")
+           f"VALUES({','.join([PH] * 32)},'closed')")
     params = (now, b.get("symbol", ""), side, b.get("reason", "") + " [nhập tay]",
               entry, ctx.get("funding_pctl"), ctx.get("trend_4h"), ctx.get("trend_1d"),
               ctx.get("rsi"), ctx.get("dist_atr"),
@@ -795,7 +812,7 @@ async def journal_manual(req: Request) -> JSONResponse:
               ctx.get("price_location"), _zone_str(ctx.get("resistance")), _zone_str(ctx.get("support")),
               _struct_str(ctx.get("structure_4h")), _struct_str(ctx.get("structure_1d")),
               ctx.get("current_zone"), _liq_str(ctx.get("liquidity_above")), _liq_str(ctx.get("liquidity_below")),
-              ctx.get("btc_regime"), b.get("entry_type"), ctx.get("spot_cvd_state"),
+              ctx.get("btc_regime"), b.get("entry_type"), ctx.get("spot_cvd_state"), ctx.get("liq_magnet"),
               now, exitp, round(pnl * 100, 2))
     rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
     return JSONResponse({"id": rid, "pnl_pct": round(pnl * 100, 2)})

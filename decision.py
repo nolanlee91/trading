@@ -148,6 +148,8 @@ def decision_state(c: dict, btc: dict) -> dict:
             reasons.append(f"BTC {btc.get('structure_4h')}/{btc.get('price_location')}"
                            + (f" · liquidity {side} {('/'.join(f'{v:g}' for v in liq))}" if liq else ""))
         reasons.append(f"Spot flow: {c.get('flow_read') or 'chưa có data'}")
+        if c.get("liq_magnet") and c.get("liq_magnet") != "balanced":
+            reasons.append(f"Liquidity magnet: {c.get('liq_magnet')}")
 
     # Invalidation
     inval = (c.get("structure_4h") or {}).get("invalidation")
