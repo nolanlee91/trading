@@ -334,6 +334,25 @@ input,select,textarea{font-family:inherit;}
 .deriv.trap .deriv-read{color:#e6bd60;}
 .deriv.trap .deriv-read::before{background:var(--mixed);}
 
+/* ---------- Structure · Location (Module 2: Support/Resistance) ---------- */
+.loc{margin-top:11px;background:var(--card-2);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;}
+.loc-head{font-size:9.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);padding:8px 12px 0;display:flex;justify-content:space-between;align-items:center;}
+.loc-badge{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.3px;padding:2px 8px;border-radius:5px;}
+.loc-badge.res{background:var(--bear-dim);color:#ff8a84;}
+.loc-badge.sup{background:var(--bull-dim);color:#6ee787;}
+.loc-badge.prem{background:var(--mixed-dim);color:#e6bd60;}
+.loc-badge.disc{background:var(--info-dim);color:#79c0ff;}
+.loc-badge.neu{background:var(--border);color:var(--text-2);}
+.loc-rows{padding:8px 12px 10px;display:flex;flex-direction:column;gap:5px;}
+.loc-row{display:grid;grid-template-columns:64px 1fr auto;gap:8px;align-items:center;font-size:11.5px;}
+.loc-row .lr-k{font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);font-weight:600;}
+.loc-row .lr-z{font-family:var(--mono);font-weight:600;color:var(--text);}
+.loc-row .lr-s{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--text-2);}
+.loc-row .lr-s .bars{display:flex;gap:2px;}
+.loc-row .lr-s .bars i{width:5px;height:9px;border-radius:1.5px;background:#2b3543;}
+.loc-row.r .lr-s .bars i.on{background:var(--bear);}
+.loc-row.s .lr-s .bars i.on{background:var(--bull);}
+
 /* ---------- Level 2 + 3 (expandable) ---------- */
 .coin-more{
   display:grid;grid-template-rows:0fr;
@@ -758,7 +777,10 @@ const MOCK = {
             {label:"Within 1 ATR of EMA20",ok:false}],
           checklist_ok:4, checklist_n:5, flags:[],
           oi_trend:"rising", oi_chg_pct:3.4, price_dir:"up", price_chg_24h:1.8,
-          funding_state:"positive", deriv_read:"New longs — cầu thật đang vào" },
+          funding_state:"positive", deriv_read:"New longs — cầu thật đang vào",
+          price_location:"premium",
+          resistance:{lo:68900,hi:69350,mid:69125,strength:4,dist_pct:2.5,sources:["swing 1D","prev week high"],touches:5},
+          support:{lo:65100,hi:66200,mid:65650,strength:5,dist_pct:-2.6,sources:["30D low","swing 1D","vol spike 1D"],touches:38} },
 
         { symbol:"ETH", price:3284.18, trend_4h:"up", trend_1d:"flat",
           dist_atr:1.4, rsi:51.2, ret7:0.8,
@@ -772,7 +794,10 @@ const MOCK = {
             {label:"Within 1 ATR of EMA20",ok:false}],
           checklist_ok:3, checklist_n:5, flags:["Mixed Trend"],
           oi_trend:"falling", oi_chg_pct:-2.6, price_dir:"up", price_chg_24h:1.1,
-          funding_state:"positive", deriv_read:"Short covering — rally yếu, KHÔNG phải cầu thật" },
+          funding_state:"positive", deriv_read:"Short covering — rally yếu, KHÔNG phải cầu thật",
+          price_location:"at_resistance",
+          resistance:{lo:3270,hi:3320,mid:3295,strength:4,dist_pct:0.3,sources:["swing 4H","vol spike 1D","prev day high"],touches:9},
+          support:{lo:3150,hi:3200,mid:3175,strength:3,dist_pct:-3.3,sources:["swing 1D","vol spike 4H"],touches:14} },
 
         { symbol:"SOL", price:142.07, trend_4h:"down", trend_1d:"down",
           dist_atr:2.6, rsi:71.8, ret7:-6.4,
@@ -786,7 +811,10 @@ const MOCK = {
             {label:"Within 1 ATR of EMA20",ok:false}],
           checklist_ok:2, checklist_n:5, flags:["Funding Extreme","Overextended","Near 30D High","Abnormal Volume"],
           oi_trend:"rising", oi_chg_pct:5.1, price_dir:"down", price_chg_24h:-2.3,
-          funding_state:"positive", deriv_read:"New shorts — lực bán thật đang vào" },
+          funding_state:"positive", deriv_read:"New shorts — lực bán thật đang vào",
+          price_location:"discount",
+          resistance:{lo:148.5,hi:151.2,mid:149.85,strength:5,dist_pct:5.5,sources:["30D high","swing 1D","vol spike 1D","prev week high"],touches:12},
+          support:{lo:138.2,hi:139.6,mid:138.9,strength:3,dist_pct:-2.2,sources:["swing 4H","vol spike 4H"],touches:7} },
 
         { symbol:"HYPE", price:28.94, trend_4h:"up", trend_1d:"up",
           dist_atr:0.5, rsi:54.0, ret7:7.1,
@@ -800,7 +828,10 @@ const MOCK = {
             {label:"Within 1 ATR of EMA20",ok:true}],
           checklist_ok:5, checklist_n:5, flags:[],
           oi_trend:"flat", oi_chg_pct:0.4, price_dir:"sideway", price_chg_24h:0.3,
-          funding_state:"neutral", deriv_read:"Trầm lắng — không có tín hiệu phái sinh" }
+          funding_state:"neutral", deriv_read:"Trầm lắng — không có tín hiệu phái sinh",
+          price_location:"mid",
+          resistance:{lo:30.4,hi:31.1,mid:30.75,strength:3,dist_pct:6.3,sources:["swing 4H","vol spike 4H"],touches:11},
+          support:{lo:27.0,hi:27.6,mid:27.3,strength:4,dist_pct:-5.7,sources:["swing 1D","swing 4H","vol spike 4H"],touches:19} }
       ]
     };
   },
@@ -934,6 +965,23 @@ function renderCoins(coins){
         <div class="deriv-read">${c.deriv_read||"—"}</div>
       </div>`;
 
+    // Module 2: Structure · Location (Support/Resistance)
+    const locMap={at_resistance:["res","At Resistance"],at_support:["sup","At Support"],
+      premium:["prem","Premium"],discount:["disc","Discount"],breakout:["sup","Breakout ↑"],
+      breakdown:["res","Breakdown ↓"],mid:["neu","Mid-range"]};
+    const [locCls,locTxt]=locMap[c.price_location]||["neu","—"];
+    const zoneStr=z=>z?`${fmtPrice(z.lo)}–${fmtPrice(z.hi)}`:"—";
+    const strBars=(z,side)=>{const n=z?z.strength:0;
+      return `<span class="bars">${Array.from({length:5},(_,i)=>`<i class="${i<n?'on':''}"></i>`).join("")}</span><span>${z?z.strength+"/5":"—"}</span>`;};
+    const loc = `
+      <div class="loc">
+        <div class="loc-head"><span>Structure · Location</span><span class="loc-badge ${locCls}">${locTxt}</span></div>
+        <div class="loc-rows">
+          <div class="loc-row r"><span class="lr-k">Resist</span><span class="lr-z">${zoneStr(c.resistance)}${c.resistance?` <span style="color:var(--muted)">${c.resistance.dist_pct>0?'+':''}${c.resistance.dist_pct}%</span>`:""}</span><span class="lr-s">${strBars(c.resistance,'r')}</span></div>
+          <div class="loc-row s"><span class="lr-k">Support</span><span class="lr-z">${zoneStr(c.support)}${c.support?` <span style="color:var(--muted)">${c.support.dist_pct}%</span>`:""}</span><span class="lr-s">${strBars(c.support,'s')}</span></div>
+        </div>
+      </div>`;
+
     const fullCl = c.checklist.map(x=>`<div class="cl-item ${x.ok?'':'fail'}"><span class="mk ${x.ok?'ok':'no'}">${x.ok?'✓':'✕'}</span><span class="lab">${x.label}</span></div>`).join("");
 
     const raw = [
@@ -979,6 +1027,8 @@ function renderCoins(coins){
         </div>
 
         ${deriv}
+
+        ${loc}
 
         ${flags?`<div class="flags">${flags}</div>`:""}
 

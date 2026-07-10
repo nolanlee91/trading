@@ -34,6 +34,7 @@ from data import fetch_ohlcv
 from data_funding import fetch_funding
 from data_oi import fetch_oi
 from indicators import atr, ema, rsi
+from levels import sr_levels
 
 # Coin theo BASE asset; nhãn hiển thị (cũng là key journal) giữ ổn định để không
 # phá các lệnh đã ghi. HYPE chỉ có trên Hyperliquid (sàn user trade thật).
@@ -246,6 +247,13 @@ def analyze_coin(symbol: str, force: bool) -> dict:
     px_24h = float(h4["close"].iloc[-7]) if len(h4) >= 7 else None   # 6 nến 4H = 24h
     deriv = _derivatives_read(oi_df, px, px_24h, ann)
 
+    # ── Module 2: Support/Resistance + Supply/Demand (thuần tính từ OHLCV) ──
+    try:
+        sr = sr_levels(h4, d1, px, atr_v)
+    except Exception:
+        sr = {"resistance": None, "support": None, "in_zone": None,
+              "price_location": "mid", "zones": []}
+
     # Bias = đánh THEO trend 4H (đừng đánh ngược trend lớn).
     bias = "long" if t4 == "bullish" else "short" if t4 == "bearish" else "neutral"
 
@@ -306,6 +314,16 @@ def analyze_coin(symbol: str, force: bool) -> dict:
         flags.append("Short covering + funding dương — rally do đóng short, không phải cầu thật")
     elif deriv["price_dir"] == "down" and deriv["oi_trend"] == "rising" and deriv["funding_state"] == "negative":
         flags.append("New shorts + funding âm — đông short, coi chừng squeeze LÊN")
+    # Cờ vị trí giá (Module 2)
+    _res, _sup, _iz = sr["resistance"], sr["support"], sr["in_zone"]
+    if sr["price_location"] == "at_resistance" and _iz and _iz["strength"] >= 4:
+        flags.append(f"Giá tại KHÁNG CỰ mạnh {_iz['lo']:g}–{_iz['hi']:g} ({_iz['strength']}/5) — vùng bán ưu tiên")
+    elif sr["price_location"] == "at_support" and _iz and _iz["strength"] >= 4:
+        flags.append(f"Giá tại HỖ TRỢ mạnh {_iz['lo']:g}–{_iz['hi']:g} ({_iz['strength']}/5) — vùng mua ưu tiên")
+    elif sr["price_location"] == "breakout":
+        flags.append("Phá đỉnh — không còn kháng cự phía trên trong tầm nhìn")
+    elif sr["price_location"] == "breakdown":
+        flags.append("Phá đáy — không còn hỗ trợ phía dưới trong tầm nhìn")
 
     return {"symbol": symbol, "price": px, "trend_4h": t4, "trend_1d": t1d,
             "dist_atr": round(dist_atr, 2), "rsi": round(r_now, 0),
@@ -315,7 +333,9 @@ def analyze_coin(symbol: str, force: bool) -> dict:
             "vol_ratio": vol_ratio, "to_high": to_high, "to_low": to_low, "corr_btc": corr_btc,
             "bias": bias, "risk_score": risk, "risk_band": band, "risk_why": why,
             "checklist": checklist, "checklist_ok": n_ok, "checklist_n": len(checklist),
-            "flags": flags, **deriv}
+            "flags": flags, **deriv,
+            "price_location": sr["price_location"], "resistance": sr["resistance"],
+            "support": sr["support"], "in_zone": sr["in_zone"], "sr_zones": sr["zones"]}
 
 
 def refresh(force: bool = False) -> None:
@@ -355,6 +375,13 @@ def trigger_refresh() -> None:
     threading.Thread(target=_run, daemon=True).start()
 
 
+def _zone_str(z: dict | None) -> str | None:
+    """Zone -> 'lo-hi (str/5)' để lưu journal gọn (Module 2)."""
+    if not z:
+        return None
+    return f"{z['lo']:g}-{z['hi']:g} ({z['strength']}/5)"
+
+
 def _ctx_for(symbol: str) -> dict:
     with _LOCK:
         for c in SNAPSHOT["coins"]:
@@ -391,6 +418,7 @@ def _gemini_context() -> str:
             "rsi", "funding_pctl", "funding_ann", "funding_vel", "dist_atr", "atr_pct",
             "vol_ratio", "to_high", "to_low", "corr_btc", "checklist_ok", "checklist_n",
             "oi_trend", "oi_chg_pct", "price_dir", "funding_state", "deriv_read",
+            "price_location", "resistance", "support",
             "flags")})
     return json.dumps({"asof": asof, "source": source, "coins": slim}, ensure_ascii=False)
 
@@ -494,6 +522,10 @@ def init_db() -> None:
             run_write(f"ALTER TABLE trades ADD COLUMN {col} {num}")
     # Module 1: cột ngữ cảnh phái sinh (TEXT — trạng thái, không phải số).
     for col in ("ctx_oi_trend", "ctx_funding_state", "ctx_price_dir"):
+        if col not in have:
+            run_write(f"ALTER TABLE trades ADD COLUMN {col} TEXT")
+    # Module 2: cột ngữ cảnh S/R (TEXT — vị trí + vùng gần nhất dạng "lo-hi (str/5)").
+    for col in ("ctx_price_location", "ctx_nearest_res", "ctx_nearest_sup"):
         if col not in have:
             run_write(f"ALTER TABLE trades ADD COLUMN {col} TEXT")
 
@@ -619,13 +651,15 @@ async def journal_open(req: Request) -> JSONResponse:
     sql = ("INSERT INTO trades(ts_open,symbol,side,reason,ctx_price,ctx_funding_pctl,"
            "ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,"
            "ctx_vol_ratio,ctx_to_high,ctx_to_low,ctx_corr_btc,"
-           "ctx_oi_trend,ctx_funding_state,ctx_price_dir,status) "
-           f"VALUES({','.join([PH] * 17)},'open')")
+           "ctx_oi_trend,ctx_funding_state,ctx_price_dir,"
+           "ctx_price_location,ctx_nearest_res,ctx_nearest_sup,status) "
+           f"VALUES({','.join([PH] * 20)},'open')")
     params = (now, b["symbol"], b.get("side", "long").lower(), b.get("reason", ""),
               ctx.get("price"), ctx.get("funding_pctl"), ctx.get("trend_4h"),
               ctx.get("trend_1d"), ctx.get("rsi"), ctx.get("dist_atr"),
               ctx.get("vol_ratio"), ctx.get("to_high"), ctx.get("to_low"), ctx.get("corr_btc"),
-              ctx.get("oi_trend"), ctx.get("funding_state"), ctx.get("price_dir"))
+              ctx.get("oi_trend"), ctx.get("funding_state"), ctx.get("price_dir"),
+              ctx.get("price_location"), _zone_str(ctx.get("resistance")), _zone_str(ctx.get("support")))
     rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
     return JSONResponse({"id": rid})
 
@@ -658,13 +692,15 @@ async def journal_manual(req: Request) -> JSONResponse:
            "ctx_trend4h,ctx_trend1d,ctx_rsi,ctx_dist_atr,"
            "ctx_vol_ratio,ctx_to_high,ctx_to_low,ctx_corr_btc,"
            "ctx_oi_trend,ctx_funding_state,ctx_price_dir,"
+           "ctx_price_location,ctx_nearest_res,ctx_nearest_sup,"
            "ts_close,exit_price,pnl_pct,status) "
-           f"VALUES({','.join([PH] * 20)},'closed')")
+           f"VALUES({','.join([PH] * 23)},'closed')")
     params = (now, b.get("symbol", ""), side, b.get("reason", "") + " [nhập tay]",
               entry, ctx.get("funding_pctl"), ctx.get("trend_4h"), ctx.get("trend_1d"),
               ctx.get("rsi"), ctx.get("dist_atr"),
               ctx.get("vol_ratio"), ctx.get("to_high"), ctx.get("to_low"), ctx.get("corr_btc"),
               ctx.get("oi_trend"), ctx.get("funding_state"), ctx.get("price_dir"),
+              ctx.get("price_location"), _zone_str(ctx.get("resistance")), _zone_str(ctx.get("support")),
               now, exitp, round(pnl * 100, 2))
     rid = run_write(sql + " RETURNING id", params, returning=True) if USE_PG else run_write(sql, params)
     return JSONResponse({"id": rid, "pnl_pct": round(pnl * 100, 2)})
