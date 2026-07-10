@@ -151,14 +151,21 @@ def decision_state(c: dict, btc: dict) -> dict:
         if c.get("liq_magnet") and c.get("liq_magnet") != "balanced":
             reasons.append(f"Liquidity magnet: {c.get('liq_magnet')}")
 
-    # Invalidation
-    inval = (c.get("structure_4h") or {}).get("invalidation")
+    # Invalidation — phải nằm ĐÚNG PHÍA đối diện hướng lệnh (short: TRÊN giá; long: DƯỚI).
+    # structure_4h.invalidation chỉ hợp lệ khi cấu trúc CÙNG hướng lệnh (bearish->short =
+    # protected lower-high ở TRÊN; bullish->long = protected higher-low ở DƯỚI). Nếu ngược
+    # hướng (vd short khi cấu trúc bullish) thì mốc đó nằm SAI phía -> fallback zone S/R.
+    px = c.get("price")
+    s4 = c.get("structure_4h") or {}
+    sinval = s4.get("invalidation")
     if direction == "short":
-        lvl = inval or (c.get("resistance") or {}).get("hi")
-        invalidation = f"H4 đóng nến TRÊN {lvl:g}" if lvl else None
+        lvl = sinval if (s4.get("state") == "bearish" and sinval and px and sinval > px) else None
+        lvl = lvl or (c.get("resistance") or {}).get("hi") or (c.get("in_zone") or {}).get("hi")
+        invalidation = f"H4 đóng nến TRÊN {lvl:g}" if lvl and (not px or lvl > px) else None
     elif direction == "long":
-        lvl = inval or (c.get("support") or {}).get("lo")
-        invalidation = f"H4 đóng nến DƯỚI {lvl:g}" if lvl else None
+        lvl = sinval if (s4.get("state") == "bullish" and sinval and px and sinval < px) else None
+        lvl = lvl or (c.get("support") or {}).get("lo") or (c.get("in_zone") or {}).get("lo")
+        invalidation = f"H4 đóng nến DƯỚI {lvl:g}" if lvl and (not px or lvl < px) else None
     else:
         invalidation = None
 
