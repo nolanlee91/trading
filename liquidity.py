@@ -34,8 +34,11 @@ def _zone_near(levels: list[float], px: float, atr_v: float, below: bool) -> dic
             break
     lo, hi = min(cluster), max(cluster)
     mid = (lo + hi) / 2
+    # Khoảng cách đo tới MÉP GẦN nhất (giá chạm tới trước), không phải midpoint —
+    # vùng rộng có midpoint xa nhưng mép gần lại sát giá (tránh magnet bị lệch).
+    near = hi if below else lo
     return {"lo": round(lo, 4), "hi": round(hi, 4), "mid": round(mid, 4),
-            "dist_pct": round((mid / px - 1) * 100, 2), "n": len(cluster)}
+            "dist_pct": round((near / px - 1) * 100, 2), "n": len(cluster)}
 
 
 def liquidity_map(px: float, atr_v: float, ms: dict, oi_trend: str | None,
