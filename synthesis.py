@@ -202,6 +202,30 @@ def synthesize(c: dict, btc: dict) -> dict:
 
     bull_w = sum(v["w"] for v in votes if v["dir"] == "bull")
     bear_w = sum(v["w"] for v in votes if v["dir"] == "bear")
+
+    # ── HEADLINE thống nhất: Synthesis điều phối, tránh Decision & net "đá nhau" ──
+    # Chỉ hô hướng khi là SETUP thật, hoặc WATCH mà net cùng chiều. Còn lại (net cân
+    # hoặc net ngược Decision) -> ĐỨNG NGOÀI, hạ lean của Decision xuống dòng phụ.
+    d = c.get("decision") or {}
+    grade, ddir = d.get("grade"), d.get("direction")
+    netd = "bull" if net >= 2 else "bear" if net <= -2 else "mixed"
+    lean = None
+    if grade == "setup" and ddir in ("short", "long"):
+        headline, stance = d.get("label"), ddir
+        # Setup NGƯỢC tổng lực (vd long anticipation khi net còn bear) -> giữ setup
+        # nhưng cảnh báo là vào sớm ngược net, canh invalidation chặt.
+        if (ddir == "long" and netd == "bear") or (ddir == "short" and netd == "bull"):
+            lean = f"⚠ Ngược tổng lực (net {net_bias}) — vào sớm/ngược, canh invalidation chặt"
+    elif grade == "watch" and ((netd == "bull" and ddir == "long") or (netd == "bear" and ddir == "short")):
+        headline = f"{'LONG' if ddir == 'long' else 'SHORT'} WATCH — chờ trigger"
+        stance = ddir
+    elif grade == "watch" and ddir in ("short", "long"):
+        headline, stance = "ĐỨNG NGOÀI — chờ trigger", "none"
+        lean = f"Decision nghiêng {ddir} nhẹ ({d.get('score')}/{d.get('max')}) nhưng tổng lực cân"
+    else:
+        headline, stance = (d.get("label") or "ĐỨNG NGOÀI — chờ trigger"), "none"
+
     return {"net": net, "net_bias": net_bias, "bull_w": bull_w, "bear_w": bear_w,
             "votes": votes, "confluence": conf, "conflict": conflict,
-            "narrative": narrative, "plays": plays}
+            "narrative": narrative, "plays": plays,
+            "headline": headline, "stance": stance, "lean": lean}

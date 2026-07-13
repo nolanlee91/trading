@@ -305,7 +305,7 @@ def analyze_coin(symbol: str, force: bool) -> dict:
     # ── L3: Checklist theo BIAS (điều kiện thuận lợi để vào lệnh thuận trend) ──
     if bias == "long":
         checklist = [
-            {"label": "4H bullish", "ok": t4 == "bullish"},
+            {"label": "4H EMA tăng", "ok": t4 == "bullish"},
             {"label": "1D không bearish", "ok": t1d != "bearish"},
             {"label": "Giá gần/dưới EMA20 (pullback để mua)", "ok": dist_atr < 0.5},
             {"label": "RSI không quá nóng (<70)", "ok": r_now < 70},
@@ -313,14 +313,14 @@ def analyze_coin(symbol: str, force: bool) -> dict:
         ]
     elif bias == "short":
         checklist = [
-            {"label": "4H bearish", "ok": t4 == "bearish"},
+            {"label": "4H EMA giảm", "ok": t4 == "bearish"},
             {"label": "1D không bullish", "ok": t1d != "bullish"},
             {"label": "Giá gần/trên EMA20 (hồi lên kháng cự để bán)", "ok": dist_atr > -0.5},
             {"label": "RSI không quá bán (>30)", "ok": r_now > 30},
             {"label": "Funding không đông short (>15pct)", "ok": f_pctl > 15},
         ]
     else:
-        checklist = [{"label": "Trend 4H rõ ràng (bull/bear)", "ok": False}]
+        checklist = [{"label": "Trend 4H (EMA) rõ ràng (bull/bear)", "ok": False}]
     n_ok = sum(1 for c in checklist if c["ok"])
 
     flags = []
@@ -508,6 +508,7 @@ def _gemini_context() -> str:
         row["setup_score"] = f"{d.get('score')}/{d.get('max')}" if d else None
         row["invalidation"] = d.get("invalidation")
         sy = c.get("synthesis") or {}
+        row["headline"] = sy.get("headline")
         row["read"] = sy.get("narrative")
         row["net_bias"] = sy.get("net_bias")
         row["conflict"] = sy.get("conflict")
