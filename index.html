@@ -393,6 +393,28 @@ input,select,textarea{font-family:inherit;}
 .dc-ci.ok .mk{background:var(--bull-dim);color:var(--bull);} .dc-ci.no .mk{background:var(--bear-dim);color:var(--bear);} .dc-ci.unk .mk{background:var(--border);color:var(--muted);}
 .dc-ci.no{color:var(--text-2);} .dc-ci.unk{color:var(--muted);}
 
+/* ---------- Synthesis (đọc nhanh + xung đột/đồng thuận + nước đi) ---------- */
+.synth{margin-top:12px;background:var(--card-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px 12px;display:flex;flex-direction:column;gap:9px;}
+.sy-read{font-size:12.5px;line-height:1.45;color:var(--text);}
+.sy-vs{display:flex;align-items:center;gap:8px;}
+.sy-bar{flex:1;height:6px;border-radius:3px;overflow:hidden;display:flex;background:#2b3543;}
+.sy-bar .b-bull{background:var(--bull);} .sy-bar .b-bear{background:var(--bear);}
+.sy-net{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.2px;text-transform:uppercase;}
+.sy-net.bull{color:var(--bull);} .sy-net.bear{color:var(--bear);} .sy-net.mixed{color:var(--text-2);}
+.sy-conflict,.sy-conf{font-size:11.5px;line-height:1.4;padding-left:2px;}
+.sy-conflict{color:#e6bd60;} .sy-conf{color:#6ee787;}
+.sy-plays{display:flex;flex-direction:column;gap:1px;background:var(--border-soft);border:1px solid var(--border-soft);border-radius:7px;overflow:hidden;margin-top:2px;}
+.sy-play{display:grid;grid-template-columns:auto 1fr;gap:6px 9px;align-items:center;padding:8px 11px;background:var(--card);font-size:11.5px;}
+.sy-play .sy-trig{font-family:var(--mono);font-weight:600;color:var(--text);}
+.sy-play .sy-act{grid-row:1;justify-self:end;font-family:var(--mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;}
+.sy-play.long .sy-act{background:var(--bull-dim);color:#6ee787;}
+.sy-play.short .sy-act{background:var(--bear-dim);color:#ff8a84;}
+.sy-play.wait .sy-act{background:var(--border);color:var(--text-2);}
+.sy-play .sy-det{grid-column:1/-1;font-size:10.5px;color:var(--muted);font-family:var(--mono);}
+.detail-blocks{padding:12px 16px 2px;border-top:1px solid var(--border-soft);}
+.detail-blocks .coin-grid,.detail-blocks .risk{margin-top:0;}
+.detail-blocks .deriv:first-child,.detail-blocks .coin-grid:first-child{margin-top:0;}
+
 /* ---------- Spot / Perp Flow (Module 5: CVD proxy) ---------- */
 .flow{margin-top:11px;background:var(--card-2);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;}
 .flow-head{font-size:9.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);padding:8px 12px 6px;display:flex;justify-content:space-between;align-items:center;}
@@ -862,7 +884,9 @@ const MOCK = {
           spot_cvd_state:"buying", flow_read:"Spot mua + OI tăng — cầu thật (real demand)",
           liq_above:{lo:68900,hi:69350,dist_pct:2.5}, liq_below:{lo:65650,hi:66200,dist_pct:-2.6},
           long_liq:[{price:66084},{price:64735},{price:60689}], short_liq:[{price:68781},{price:70130},{price:74176}], liq_magnet:"balanced",
-          btc_regime:"", decision:{direction:"long",stage:"confirmation",label:"LONG SETUP — Confirmation",grade:"setup",score:5,max:7,
+          btc_regime:"",
+          synthesis:{net:6,net_bias:"bullish",bull_w:9,bear_w:2,narrative:"Giá giữ hỗ trợ 65100–66200 thuận cấu trúc tăng — thiên LONG, chờ trigger reclaim.",conflict:null,confluence:["OI tăng + spot mua → cầu thật đang vào"],plays:[{trigger:"Đóng H4 > 66200",action:"LONG",detail:"stop < 65100 · target 68900 / 69800"},{trigger:"Đóng H4 < 65100",action:"SHORT",detail:"stop > 69350 · target 64200 / 62000"},{trigger:"Kẹt 66200–68900",action:"ĐỨNG NGOÀI",detail:"chờ 1 trong 2 mốc trên"}]},
+          decision:{direction:"long",stage:"confirmation",label:"LONG SETUP — Confirmation",grade:"setup",score:5,max:7,
             invalidation:"H4 đóng nến DƯỚI 65100",
             reasons:["H4 bullish (BOS)","Giá: discount · H4 Demand","Funding neutral · OI rising · New longs — cầu thật","Spot flow: chưa có data (Module 5)"],
             checklist:[{label:"Giá tại H4/D1 demand (support/discount)",ok:true},{label:"Cấu trúc H4 bullish hoặc higher-low",ok:true},{label:"Funding không đông long (âm/trung tính)",ok:true},{label:"OI không đỡ bán short thật",ok:true},{label:"BTC không phá xuống hỗ trợ chính",ok:true},{label:"Spot flow không bán tháo / có cầu",ok:null},{label:"Có invalidation rõ phía dưới vùng",ok:true}]} },
@@ -890,7 +914,9 @@ const MOCK = {
           spot_cvd_state:"flat", flow_read:"Perp mua nhưng spot không theo — rally yếu",
           liq_above:{lo:3320,hi:3320,dist_pct:1.1}, liq_below:{lo:3175,hi:3175,dist_pct:-3.3},
           long_liq:[{price:3218},{price:3153},{price:2956}], short_liq:[{price:3350},{price:3416},{price:3613}], liq_magnet:"downside",
-          btc_regime:"bullish/premium", decision:{direction:"short",stage:"anticipation",label:"SHORT SETUP — Anticipation",grade:"setup",score:5,max:7,
+          btc_regime:"bullish/premium",
+          synthesis:{net:-4,net_bias:"lean-bear",bull_w:3,bear_w:8,narrative:"Giá chạm kháng cự 3270–3320 thuận cấu trúc giảm — thiên SHORT, rally do short covering (yếu).",conflict:"Bias 4H (long) ⚔ Cấu trúc 4H (short)",confluence:["Giá lên kháng cự bằng short covering → rally cạn hơi"],plays:[{trigger:"Đóng H4 < 3150",action:"SHORT",detail:"stop > 3320 · target 3080 / 2960"},{trigger:"Đóng H4 > 3320",action:"LONG",detail:"stop < 3150 · target 3410 / 3520"},{trigger:"Kẹt 3200–3270",action:"ĐỨNG NGOÀI",detail:"chờ 1 trong 2 mốc trên"}]},
+          decision:{direction:"short",stage:"anticipation",label:"SHORT SETUP — Anticipation",grade:"setup",score:5,max:7,
             invalidation:"H4 đóng nến TRÊN 3320",
             reasons:["H4 bearish (CHOCH)","Giá: at_resistance · H4 Supply (FVG)","Funding positive · OI falling · Short covering — rally yếu","BTC bullish/premium · liquidity below 65650/64200/62000","Spot flow: chưa có data (Module 5)"],
             checklist:[{label:"Giá tại H4/D1 supply (resistance/premium)",ok:true},{label:"Cấu trúc H4 bearish hoặc lower-high",ok:true},{label:"Funding dương (long đang trả phí)",ok:true},{label:"OI không đỡ rally long thật",ok:true},{label:"BTC không phá lên kháng cự chính",ok:false},{label:"Spot flow yếu / không mua chủ động",ok:null},{label:"Có invalidation rõ phía trên vùng",ok:true}]} },
@@ -918,7 +944,9 @@ const MOCK = {
           spot_cvd_state:"selling", flow_read:"Perp đỡ giá, spot xả — thiếu bền",
           liq_above:{lo:148.5,hi:148.5,dist_pct:4.5}, liq_below:{lo:138.9,hi:138.9,dist_pct:-2.2},
           long_liq:[{price:139.2},{price:136.4},{price:127.9}], short_liq:[{price:144.9},{price:147.8},{price:156.3}], liq_magnet:"upside",
-          btc_regime:"bullish/premium", decision:{direction:"short",stage:"confirmation",label:"SHORT WATCH — Confirmation",grade:"watch",score:4,max:7,
+          btc_regime:"bullish/premium",
+          synthesis:{net:-2,net_bias:"lean-bear",bull_w:4,bear_w:7,narrative:"Bò gấu ngắn hạn (4H CHOCH xuống) nhưng giá ở discount — chờ hồi lên kháng cự để short.",conflict:"Vị trí giá (long) ⚔ Cấu trúc 4H (short)",confluence:[],plays:[{trigger:"Đóng H4 < 138.2",action:"SHORT",detail:"stop > 151.2 · target 134 / 128"},{trigger:"Đóng H4 > 148.5",action:"LONG",detail:"stop < 138.2 · target 152 / 158"},{trigger:"Kẹt 139.6–148.5",action:"ĐỨNG NGOÀI",detail:"chờ 1 trong 2 mốc trên"}]},
+          decision:{direction:"short",stage:"confirmation",label:"SHORT WATCH — Confirmation",grade:"watch",score:4,max:7,
             invalidation:"H4 đóng nến TRÊN 149.85",
             reasons:["H4 bearish (BOS)","Giá: discount (chưa tới supply)","Funding positive · OI rising · New shorts","Spot flow: chưa có data (Module 5)"],
             checklist:[{label:"Giá tại H4/D1 supply (resistance/premium)",ok:false},{label:"Cấu trúc H4 bearish hoặc lower-high",ok:true},{label:"Funding dương (long đang trả phí)",ok:true},{label:"OI không đỡ rally long thật",ok:true},{label:"BTC không phá lên kháng cự chính",ok:false},{label:"Spot flow yếu / không mua chủ động",ok:null},{label:"Có invalidation rõ phía trên vùng",ok:true}]} },
@@ -946,7 +974,9 @@ const MOCK = {
           spot_cvd_state:"buying", flow_read:"Spot mua dẫn — cầu thật (real demand)",
           liq_above:{lo:30.4,hi:30.4,dist_pct:5.0}, liq_below:{lo:27.3,hi:27.3,dist_pct:-5.7},
           long_liq:[{price:28.4},{price:27.8},{price:26.0}], short_liq:[{price:29.5},{price:30.1},{price:31.8}], liq_magnet:"balanced",
-          btc_regime:"bullish/premium", decision:{direction:"none",stage:null,label:"NO SETUP — đứng ngoài",grade:"none",score:2,max:7,
+          btc_regime:"bullish/premium",
+          synthesis:{net:1,net_bias:"mixed",bull_w:6,bear_w:5,narrative:"Tín hiệu trộn, giá giữa vùng 27–30.4 — đứng ngoài chờ rõ.",conflict:"Vị trí giá (long) ⚔ Cấu trúc 4H (short)",confluence:[],plays:[{trigger:"Đóng H4 > 27.6",action:"LONG",detail:"stop < 27 · target 30.4 / 31.8"},{trigger:"Đóng H4 < 27",action:"SHORT",detail:"stop > 31.1 · target 26 / 24.5"},{trigger:"Kẹt 27.6–30.4",action:"ĐỨNG NGOÀI",detail:"chờ 1 trong 2 mốc trên"}]},
+          decision:{direction:"none",stage:null,label:"NO SETUP — đứng ngoài",grade:"none",score:2,max:7,
             invalidation:null,
             reasons:[],
             checklist:[{label:"Giá tại H4/D1 demand (support/discount)",ok:false},{label:"Cấu trúc H4 bullish hoặc higher-low",ok:true},{label:"Funding không đông long (âm/trung tính)",ok:false},{label:"OI không đỡ bán short thật",ok:true},{label:"BTC không phá xuống hỗ trợ chính",ok:false},{label:"Spot flow không bán tháo / có cầu",ok:null},{label:"Có invalidation rõ phía dưới vùng",ok:false}]} }
@@ -1161,6 +1191,23 @@ function renderCoins(coins){
         ${decReasons?`<ul class="dc-reasons">${decReasons}</ul>`:""}
       </div>` : "";
 
+    // Synthesis: đọc nhanh + xung đột/đồng thuận + nước đi (tổng hợp các layer)
+    const sy = c.synthesis || {};
+    const netCls = (sy.net_bias||"").includes("bull")?"bull":(sy.net_bias||"").includes("bear")?"bear":"mixed";
+    const bw=sy.bull_w||0, brw=sy.bear_w||0, tot=(bw+brw)||1;
+    const syConflict = sy.conflict?`<div class="sy-conflict">🔀 ${sy.conflict}</div>`:"";
+    const syConf = (sy.confluence||[]).map(x=>`<div class="sy-conf">✅ ${x}</div>`).join("");
+    const syPlays = (sy.plays||[]).map(p=>{
+      const ac=p.action==="LONG"?"long":p.action==="SHORT"?"short":"wait";
+      return `<div class="sy-play ${ac}"><span class="sy-trig">${p.trigger}</span><span class="sy-act">${p.action}</span><span class="sy-det">${p.detail}</span></div>`;}).join("");
+    const synth = sy.narrative ? `
+      <div class="synth">
+        <div class="sy-read">${sy.narrative}</div>
+        <div class="sy-vs"><div class="sy-bar"><span class="b-bull" style="width:${bw/tot*100}%"></span><span class="b-bear" style="width:${brw/tot*100}%"></span></div><span class="sy-net ${netCls}">${(sy.net_bias||'').replace('-',' ')}</span></div>
+        ${syConflict}${syConf}
+        ${syPlays?`<div class="sy-plays">${syPlays}</div>`:""}
+      </div>` : "";
+
     const fullCl = c.checklist.map(x=>`<div class="cl-item ${x.ok?'':'fail'}"><span class="mk ${x.ok?'ok':'no'}">${x.ok?'✓':'✕'}</span><span class="lab">${x.label}</span></div>`).join("");
 
     const raw = [
@@ -1176,7 +1223,6 @@ function renderCoins(coins){
 
     card.innerHTML=`
       <div class="coin-l1">
-        ${decision}
         <div class="coin-top">
           <div class="coin-id">
             <div class="coin-sym"><span class="coin-tick">${c.symbol.split("/")[0]}</span><span class="coin-price">$${fmtPrice(c.price)}</span></div>
@@ -1191,30 +1237,9 @@ function renderCoins(coins){
           </div>
         </div>
 
-        <div class="coin-grid">
-          ${cell("Funding pctl", `<span class="${c.funding_pctl>=80?'down':c.funding_pctl<=20?'up':''}">${c.funding_pctl}<small>th</small></span>`)}
-          ${cell("RSI", `${fmtNum(c.rsi,0)}`)}
-          ${cell("7D", `<span class="${signClass(c.ret7)}">${pct(c.ret7,1)}</span>`)}
-        </div>
+        ${decision}
 
-        <div class="risk">
-          <div class="risk-top">
-            <span class="risk-label">Risk <span class="risk-score" style="color:${riskColor(c.risk_band)}">${c.risk_score}<span style="color:var(--muted)">/9</span></span></span>
-            <span class="risk-band ${c.risk_band}">${c.risk_band.toUpperCase()}</span>
-          </div>
-          <div class="risk-bar">${segs}</div>
-          <div class="risk-why">${why}</div>
-        </div>
-
-        ${deriv}
-
-        ${loc}
-
-        ${struct}
-
-        ${flow}
-
-        ${liqmap}
+        ${synth}
 
         ${flags?`<div class="flags">${flags}</div>`:""}
 
@@ -1225,6 +1250,22 @@ function renderCoins(coins){
       </div>
 
       <div class="coin-more"><div class="coin-more-in">
+        <div class="detail-blocks">
+          <div class="coin-grid">
+            ${cell("Funding pctl", `<span class="${c.funding_pctl>=80?'down':c.funding_pctl<=20?'up':''}">${c.funding_pctl}<small>th</small></span>`)}
+            ${cell("RSI", `${fmtNum(c.rsi,0)}`)}
+            ${cell("7D", `<span class="${signClass(c.ret7)}">${pct(c.ret7,1)}</span>`)}
+          </div>
+          <div class="risk">
+            <div class="risk-top">
+              <span class="risk-label">Risk <span class="risk-score" style="color:${riskColor(c.risk_band)}">${c.risk_score}<span style="color:var(--muted)">/9</span></span></span>
+              <span class="risk-band ${c.risk_band}">${c.risk_band.toUpperCase()}</span>
+            </div>
+            <div class="risk-bar">${segs}</div>
+            <div class="risk-why">${why}</div>
+          </div>
+          ${deriv}${loc}${struct}${flow}${liqmap}
+        </div>
         <div class="l2">
           <div class="sub-label">Positioning &amp; Momentum</div>
           <div class="l2-grid">${l2}</div>

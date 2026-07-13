@@ -39,6 +39,7 @@ from indicators import atr, ema, rsi
 from levels import sr_levels
 from liquidity import liquidity_map
 from structure import market_structure
+from synthesis import synthesize
 
 # Coin theo BASE asset; nhãn hiển thị (cũng là key journal) giữ ổn định để không
 # phá các lệnh đã ghi. HYPE chỉ có trên Hyperliquid (sàn user trade thật).
@@ -409,6 +410,7 @@ def refresh(force: bool = False) -> None:
             continue
         c["btc_regime"] = "" if c is btc else f"{regime.get('structure_4h')}/{regime.get('price_location')}"
         c["decision"] = decision_state(c, {} if c is btc else regime)
+        c["synthesis"] = synthesize(c, {} if c is btc else regime)
     with _LOCK:
         SNAPSHOT["coins"] = coins
         SNAPSHOT["asof"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -505,6 +507,10 @@ def _gemini_context() -> str:
         row["decision"] = d.get("label")
         row["setup_score"] = f"{d.get('score')}/{d.get('max')}" if d else None
         row["invalidation"] = d.get("invalidation")
+        sy = c.get("synthesis") or {}
+        row["read"] = sy.get("narrative")
+        row["net_bias"] = sy.get("net_bias")
+        row["conflict"] = sy.get("conflict")
         slim.append(row)
     return json.dumps({"asof": asof, "source": source, "coins": slim}, ensure_ascii=False)
 
