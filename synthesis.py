@@ -134,7 +134,11 @@ def _narrative(c: dict, net_bias: str) -> str:
     side = _loc_side(c)
     sd = (c.get("structure_4h") or {}).get("state")
     dn = _deriv_note(c)
-    sup, res = _zstr(c.get("support")), _zstr(c.get("resistance"))
+    # Khi giá ĐANG trong 1 zone (at_support/at_resistance) -> hiển thị đúng vùng đó
+    # (in_zone), không phải vùng kế bên.
+    loc = c.get("price_location")
+    sup = _zstr(c.get("in_zone") if loc == "at_support" else c.get("support"))
+    res = _zstr(c.get("in_zone") if loc == "at_resistance" else c.get("resistance"))
     if side == "support" and sd == "bearish":
         return f"Bò gấu ngắn hạn (4H CHOCH xuống) nhưng giá xả vào hỗ trợ {sup} — {dn}; vùng giằng co, chờ giá chọn phe."
     if side == "resistance" and sd == "bullish":
@@ -155,28 +159,35 @@ def _narrative(c: dict, net_bias: str) -> str:
 
 
 def _plays(c: dict) -> list[dict]:
-    """Nước đi có điều kiện từ zone S/R + liquidity. trigger → action + stop + target."""
+    """Nước đi có điều kiện. Mốc trigger = BIÊN của vùng giá ĐANG đứng trong (in_zone);
+    nếu giá lửng giữa 2 vùng thì dùng đáy resistance-trên / đỉnh support-dưới. Target
+    luôn NẰM NGOÀI trigger (trên up cho long, dưới dn cho short) để không ngược chiều."""
+    iz = c.get("in_zone")
     sup, res = c.get("support"), c.get("resistance")
     la = c.get("liquidity_above") or []
     lb = c.get("liquidity_below") or []
     inval = (c.get("decision") or {}).get("invalidation")
-    plays = []
-    if sup and res:
-        # LONG khi reclaim đỉnh vùng hỗ trợ (giá đang ở/dưới hỗ trợ) hoặc phá kháng cự
-        long_trig = f"Đóng H4 > {sup['hi']:g}"
-        tgt_up = " / ".join(f"{x:g}" for x in (la[:2] or [res['lo']]))
-        plays.append({"trigger": long_trig, "action": "LONG",
-                      "detail": f"stop < {sup['lo']:g} · target {tgt_up}"})
-        # SHORT khi mất đáy vùng hỗ trợ
-        short_trig = f"Đóng H4 < {sup['lo']:g}"
-        tgt_dn = " / ".join(f"{x:g}" for x in (lb[:2] or [sup['lo']]))
-        stop = f"{inval.split()[-1]}" if inval and "TRÊN" in (inval or "") else f"{res['hi']:g}"
-        plays.append({"trigger": short_trig, "action": "SHORT",
-                      "detail": f"stop > {stop} · target {tgt_dn}"})
-        # Kẹt giữa → đứng ngoài
-        plays.append({"trigger": f"Kẹt {sup['hi']:g}–{res['lo']:g}", "action": "ĐỨNG NGOÀI",
-                      "detail": "chưa có phe thắng, chờ 1 trong 2 mốc trên"})
-    return plays
+
+    if iz:                              # giá đang TRONG 1 vùng -> biên vùng đó là mốc sát nhất
+        up, dn = iz["hi"], iz["lo"]
+    elif sup and res:                   # giá lửng giữa 2 vùng
+        up, dn = res["lo"], sup["hi"]
+    else:
+        return []
+
+    tgt_up = [x for x in la if x > up][:2] or ([res["hi"]] if res and res["hi"] > up else [])
+    tgt_dn = [x for x in lb if x < dn][:2] or ([sup["lo"]] if sup and sup["lo"] < dn else [])
+    stop_hi = inval.split()[-1] if inval and "TRÊN" in inval else (f"{res['hi']:g}" if res else "?")
+    su = " / ".join(f"{x:g}" for x in tgt_up) or "—"
+    sd = " / ".join(f"{x:g}" for x in tgt_dn) or "—"
+    return [
+        {"trigger": f"Đóng H4 > {up:g}", "action": "LONG",
+         "detail": f"stop < {dn:g} · target {su}"},
+        {"trigger": f"Đóng H4 < {dn:g}", "action": "SHORT",
+         "detail": f"stop > {stop_hi} · target {sd}"},
+        {"trigger": f"Kẹt {dn:g}–{up:g}", "action": "ĐỨNG NGOÀI",
+         "detail": "chưa có phe thắng, chờ 1 trong 2 mốc trên"},
+    ]
 
 
 def synthesize(c: dict, btc: dict) -> dict:
